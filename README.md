@@ -61,12 +61,12 @@ A production-ready, multi-user video conferencing application built with WebRTC,
 
 | Layer | Technology |
 |---|---|
-| Frontend framework | React 18 |
-| Build tool | Vite 5 |
+| Frontend framework | React 19.2.5 |
+| Build tool | Vite 8.0.10 |
 | Styling | Vanilla CSS (custom design system, dark glassmorphism) |
 | Real-time transport | WebRTC (browser native) |
-| Signaling | Socket.IO 4 |
-| Backend | Node.js + Express 4 |
+| Signaling | Socket.IO 4.8.3 |
+| Backend | Node.js + Express 5.2.1 |
 | Recording | MediaRecorder API + Canvas composite + Web Audio API |
 
 ---
