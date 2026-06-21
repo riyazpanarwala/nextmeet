@@ -16,13 +16,13 @@ export default function App() {
   const mediaState = useMediaDevices();
 
   const handleJoin = useCallback(
-    async ({ name, roomId }) => {
+    async ({ name, roomId, isMuted, isVideoOff }) => {
       setPhase(PHASE.CONNECTING);
 
       // Get media FIRST — localStreamRef must be populated before Room mounts
       // so tracks are available when createPeerConnection() is called
       try {
-        await mediaState.startLocalStream();
+        await mediaState.startLocalStream(undefined, undefined, { isMuted, isVideoOff });
       } catch (err) {
         const msg =
           err.name === 'NotAllowedError'
@@ -44,7 +44,7 @@ export default function App() {
       // Set localInfo → triggers Room to mount → Room registers all socket
       // listeners in its useEffect → THEN emits join-room.
       // This prevents the race where join-room fires before listeners are attached.
-      setLocalInfo({ name, roomId });
+      setLocalInfo({ name, roomId, isMuted, isVideoOff });
       setPhase(PHASE.ROOM);
     },
     [socket, mediaState]

@@ -7,6 +7,8 @@ export function Lobby({ onJoin }) {
   const [tab, setTab] = useState('new'); // 'new' | 'join'
   const [preview, setPreview] = useState(null);
   const [permError, setPermError] = useState('');
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
   const [copied, setCopied] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -17,15 +19,32 @@ export function Lobby({ onJoin }) {
     return () => streamRef.current?.getTracks().forEach((t) => t.stop());
   }, []);
 
+  useEffect(() => {
+    if (videoRef.current && preview) videoRef.current.srcObject = preview;
+  }, [preview, isVideoOff]);
+
   const startPreview = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       streamRef.current = stream;
       setPreview(stream);
+      setPermError('');
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch {
       setPermError('Camera access denied — you can still join audio-only.');
     }
+  };
+
+  const togglePreviewVideo = async () => {
+    if (isVideoOff) {
+      setIsVideoOff(false);
+      if (!streamRef.current?.getVideoTracks().length) await startPreview();
+      streamRef.current?.getVideoTracks().forEach((track) => { track.enabled = true; });
+      return;
+    }
+
+    setIsVideoOff(true);
+    streamRef.current?.getVideoTracks().forEach((track) => { track.enabled = false; });
   };
 
   const handleCopy = () => {
@@ -40,7 +59,7 @@ export function Lobby({ onJoin }) {
     const finalRoomId = (tab === 'new' ? roomId : joinRoomId).trim().toUpperCase();
     if (!finalRoomId) return;
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    onJoin({ name: trimmedName, roomId: finalRoomId });
+    onJoin({ name: trimmedName, roomId: finalRoomId, isMuted, isVideoOff });
   };
 
   const handleKey = (e) => { if (e.key === 'Enter') handleJoin(); };
@@ -51,11 +70,36 @@ export function Lobby({ onJoin }) {
 
         {/* Camera preview */}
         <div className="lobby-preview">
-          {permError
+          {isVideoOff
+            ? <div className="preview-off" aria-label="Camera is off">
+                <span>{name.trim().charAt(0).toUpperCase() || '?'}</span>
+                <p>Camera is off</p>
+              </div>
+            : permError
             ? <div className="preview-error">{permError}</div>
             : <video ref={videoRef} autoPlay muted playsInline />
           }
           <div className="preview-label">Preview</div>
+          <div className="preview-controls" aria-label="Pre-join media controls">
+            <button
+              type="button"
+              className={`preview-control ${isMuted ? 'off' : ''}`}
+              onClick={() => setIsMuted((muted) => !muted)}
+              aria-pressed={isMuted}
+              title={isMuted ? 'Turn microphone on' : 'Mute microphone'}
+            >
+              {isMuted ? 'Mic off' : 'Mic on'}
+            </button>
+            <button
+              type="button"
+              className={`preview-control ${isVideoOff ? 'off' : ''}`}
+              onClick={togglePreviewVideo}
+              aria-pressed={isVideoOff}
+              title={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
+            >
+              {isVideoOff ? 'Camera off' : 'Camera on'}
+            </button>
+          </div>
         </div>
 
         {/* Form */}

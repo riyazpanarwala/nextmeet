@@ -32,7 +32,7 @@ io.on('connection', (socket) => {
   console.log(`[+] Socket connected: ${socket.id}`);
 
   // ─── JOIN ROOM ───────────────────────────────────────────────
-  socket.on('join-room', ({ roomId, userName }) => {
+  socket.on('join-room', ({ roomId, userName, isMuted = false, isVideoOff = false }) => {
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
 
@@ -49,8 +49,8 @@ io.on('connection', (socket) => {
     room.set(socket.id, {
       name: userName,
       isHost,
-      isMuted: false,
-      isVideoOff: false,
+      isMuted: Boolean(isMuted),
+      isVideoOff: Boolean(isVideoOff),
       roomId,
     });
 
@@ -71,6 +71,8 @@ io.on('connection', (socket) => {
       socketId: socket.id,
       name: userName,
       isHost,
+      isMuted: Boolean(isMuted),
+      isVideoOff: Boolean(isVideoOff),
     });
   });
 

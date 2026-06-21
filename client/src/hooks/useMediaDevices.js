@@ -28,7 +28,7 @@ export function useMediaDevices() {
   }, []);
 
   const startLocalStream = useCallback(
-    async (audioDeviceId, videoDeviceId) => {
+    async (audioDeviceId, videoDeviceId, initialState = { isMuted, isVideoOff }) => {
       try {
         const constraints = {
           audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
@@ -37,8 +37,14 @@ export function useMediaDevices() {
             : { width: 1280, height: 720 },
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const nextMuted = Boolean(initialState.isMuted);
+        const nextVideoOff = Boolean(initialState.isVideoOff);
+        stream.getAudioTracks().forEach((track) => { track.enabled = !nextMuted; });
+        stream.getVideoTracks().forEach((track) => { track.enabled = !nextVideoOff; });
         localStreamRef.current = stream;
         setLocalStream(stream);
+        setIsMuted(nextMuted);
+        setIsVideoOff(nextVideoOff);
         await loadDevices();
         return stream;
       } catch (err) {
@@ -46,7 +52,7 @@ export function useMediaDevices() {
         throw err;
       }
     },
-    [loadDevices]
+    [loadDevices, isMuted, isVideoOff]
   );
 
   // NOTE: Room.jsx manages track.enabled directly via refs for immediacy.

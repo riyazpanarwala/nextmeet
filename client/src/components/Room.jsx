@@ -119,7 +119,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       }
     };
 
-    const onUserJoined = ({ socketId, name, isHost: theirHost }) => {
+    const onUserJoined = ({ socketId, name, isHost: theirHost, isMuted: theirMuted, isVideoOff: theirVideoOff }) => {
       console.log('[Room] user-joined:', socketId, name);
       setRemoteParticipants((prev) => ({
         ...prev,
@@ -127,8 +127,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           ...(prev[socketId] || {}),
           name,
           isHost: theirHost,
-          isMuted: false,
-          isVideoOff: false,
+          isMuted: Boolean(theirMuted),
+          isVideoOff: Boolean(theirVideoOff),
         },
       }));
     };
@@ -222,7 +222,12 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
     // Emit join AFTER listeners are registered
     console.log('[Room] Emitting join-room:', localInfo.roomId);
-    socket.emit('join-room', { roomId: localInfo.roomId, userName: localInfo.name });
+    socket.emit('join-room', {
+      roomId: localInfo.roomId,
+      userName: localInfo.name,
+      isMuted: isMutedRef.current,
+      isVideoOff: isVideoOffRef.current,
+    });
 
     return () => {
       socket.off('room-joined', onRoomJoined);
