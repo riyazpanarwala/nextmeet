@@ -18,6 +18,7 @@ export function ParticipantsPanel({ participants, isHost, onMuteUser, onRemoveUs
               </span>
               <div className="participant-badges">
                 {p.isHost && <span className="badge-host">Host</span>}
+                {p.handRaised && <span className="badge-hand">Hand raised</span>}
                 {p.isMuted && <span className="badge-muted">Muted</span>}
                 {p.isVideoOff && <span className="badge-video">No Video</span>}
               </div>

@@ -33,6 +33,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const [isHost, setIsHost] = useState(false);
   const [localSocketId, setLocalSocketId] = useState('');
   const [roomFullError, setRoomFullError] = useState(false);
+  const [localHandRaised, setLocalHandRaised] = useState(false);
 
   // Stable refs so socket handlers don't re-register on every render
   const isMutedRef = useRef(isMuted);
@@ -169,7 +170,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       }
     };
 
-    const onUserJoined = ({ socketId, name, isHost: theirHost, isMuted: theirMuted, isVideoOff: theirVideoOff }) => {
+    const onUserJoined = ({
+      socketId,
+      name,
+      isHost: theirHost,
+      isMuted: theirMuted,
+      isVideoOff: theirVideoOff,
+      handRaised: theirHandRaised,
+    }) => {
       console.log('[Room] user-joined:', socketId, name);
       setRemoteParticipants((prev) => ({
         ...prev,
@@ -179,6 +187,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           isHost: theirHost,
           isMuted: Boolean(theirMuted),
           isVideoOff: Boolean(theirVideoOff),
+          handRaised: Boolean(theirHandRaised),
         },
       }));
 
@@ -244,6 +253,13 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       }));
     };
 
+    const onPeerHandState = ({ socketId, raised }) => {
+      setRemoteParticipants((prev) => ({
+        ...prev,
+        [socketId]: { ...(prev[socketId] || {}), handRaised: Boolean(raised) },
+      }));
+    };
+
     const onPeerScreenShare = ({ socketId, sharing }) => {
       setRemoteParticipants((prev) => ({
         ...prev,
@@ -275,11 +291,19 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     const onHostMuteAll = () => {
       const audioTracks = localStreamRef.current?.getAudioTracks() || [];
       audioTracks.forEach((t) => (t.enabled = false));
+      if (!isMutedRef.current) {
+        isMutedRef.current = true;
+        toggleMute();
+      }
       socket.emit('media-state', {
         roomId: localInfo.roomId,
         isMuted: true,
         isVideoOff: isVideoOffRef.current,
       });
+    };
+
+    const onHostMuteUser = () => {
+      onHostMuteAll();
     };
 
     const onHostTransferred = ({ socketId }) => {
@@ -309,9 +333,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     socket.on('ice-candidate', onIceCandidate);
     socket.on('user-left', onUserLeft);
     socket.on('peer-media-state', onPeerMediaState);
+    socket.on('peer-hand-state', onPeerHandState);
     socket.on('peer-screen-share', onPeerScreenShare);
     socket.on('chat-message', onChatMessage);
     socket.on('host-mute-all', onHostMuteAll);
+    socket.on('host-mute-user', onHostMuteUser);
     socket.on('host-transferred', onHostTransferred);
     socket.on('removed-from-room', onRemovedFromRoom);
 
@@ -333,9 +359,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       socket.off('ice-candidate', onIceCandidate);
       socket.off('user-left', onUserLeft);
       socket.off('peer-media-state', onPeerMediaState);
+      socket.off('peer-hand-state', onPeerHandState);
       socket.off('peer-screen-share', onPeerScreenShare);
       socket.off('chat-message', onChatMessage);
       socket.off('host-mute-all', onHostMuteAll);
+      socket.off('host-mute-user', onHostMuteUser);
       socket.off('host-transferred', onHostTransferred);
       socket.off('removed-from-room', onRemovedFromRoom);
     };
@@ -370,6 +398,17 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       isVideoOff: newVideoOff,
     });
   }, [socket, localInfo, localStreamRef, toggleVideo]);
+
+  const handleToggleHand = useCallback(() => {
+    setLocalHandRaised((raised) => {
+      const nextRaised = !raised;
+      socket.emit('hand-state', {
+        roomId: localInfo.roomId,
+        raised: nextRaised,
+      });
+      return nextRaised;
+    });
+  }, [socket, localInfo]);
 
   const replaceLocalStreamTracks = useCallback(async (oldStream, newStream) => {
     if (!oldStream || !newStream || oldStream === newStream) return;
@@ -574,6 +613,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       isVideoOff,
       isLocal: true,
       isScreenShare: false,
+      handRaised: localHandRaised,
     },
     ...Object.entries(remoteParticipants).map(([id, data]) => ({
       socketId: id,
@@ -606,6 +646,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
   const count = allParticipants.length;
   const cols = count === 1 ? 1 : count <= 4 ? 2 : 3;
+  const raisedHandCount = allParticipants.filter((p) => p.handRaised).length;
 
   // ── Screen-share presentation layout ────────────────────────────
   // A pin only counts if that screen share is still active.
@@ -681,6 +722,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             </svg>
             {count}/6
           </span>
+          {raisedHandCount > 0 && (
+            <span className="participant-count-tag" title="Raised hands">
+              Hand {raisedHandCount}
+            </span>
+          )}
           {activeSharerIds.size > 0 && (
             <span className="participant-count-tag" title="Active screen shares">
               🖥️ {activeSharerIds.size}/{MAX_SCREEN_SHARES}
@@ -777,6 +823,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
               isHost: p.isHost,
               isMuted: p.isMuted,
               isVideoOff: p.isVideoOff,
+              handRaised: p.handRaised,
             }))}
             isHost={isHost}
             localSocketId={localSocketId}
@@ -813,9 +860,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         hasVideoTrack={hasVideoTrack}
         isScreenSharing={isScreenSharing}
         isRecording={isRecording}
+        isHandRaised={localHandRaised}
         canShareScreen={canShareScreen}
         onToggleMute={handleToggleMute}
         onToggleVideo={handleToggleVideo}
+        onToggleHand={handleToggleHand}
         onToggleScreen={handleToggleScreen}
         onLeave={doLeave}
         onToggleChat={handleToggleChat}

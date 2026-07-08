@@ -15,7 +15,7 @@ const io = new Server(server, {
   },
 });
 
-// roomId -> Map<socketId, { name, isHost, isMuted, isVideoOff }>
+// roomId -> Map<socketId, { name, isHost, isMuted, isVideoOff, handRaised }>
 const rooms = new Map();
 const MAX_PARTICIPANTS = 6;
 
@@ -60,6 +60,7 @@ io.on('connection', (socket) => {
       isHost,
       isMuted: Boolean(isMuted),
       isVideoOff: Boolean(isVideoOff),
+      handRaised: false,
       roomId,
     });
 
@@ -88,6 +89,7 @@ io.on('connection', (socket) => {
       isHost,
       isMuted: Boolean(isMuted),
       isVideoOff: Boolean(isVideoOff),
+      handRaised: false,
     });
   });
 
@@ -118,6 +120,19 @@ io.on('connection', (socket) => {
       socketId: socket.id,
       isMuted,
       isVideoOff,
+    });
+  });
+
+  socket.on('hand-state', ({ roomId, raised }) => {
+    const room = rooms.get(roomId);
+    if (room && room.has(socket.id)) {
+      const participant = room.get(socket.id);
+      room.set(socket.id, { ...participant, handRaised: Boolean(raised) });
+    }
+
+    socket.to(roomId).emit('peer-hand-state', {
+      socketId: socket.id,
+      raised: Boolean(raised),
     });
   });
 
@@ -178,6 +193,13 @@ io.on('connection', (socket) => {
     const requester = room?.get(socket.id);
     if (!requester?.isHost) return;
     socket.to(roomId).emit('host-mute-all');
+  });
+
+  socket.on('mute-user', ({ roomId, targetSocketId }) => {
+    const room = rooms.get(roomId);
+    const requester = room?.get(socket.id);
+    if (!requester?.isHost || !room?.has(targetSocketId)) return;
+    io.to(targetSocketId).emit('host-mute-user');
   });
 
   socket.on('remove-user', ({ roomId, targetSocketId }) => {

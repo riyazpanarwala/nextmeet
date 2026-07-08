@@ -50,6 +50,10 @@ export function VideoTile({
         <span className="tile-primary-badge">Presenting</span>
       )}
 
+      {participant?.handRaised && !isScreenShare && (
+        <span className="tile-hand-badge">Hand raised</span>
+      )}
+
       {/* "Set as Main" control — shown on non-primary screen shares so the
           user can promote any active share to the full-width main view */}
       {showPrimaryButton && (

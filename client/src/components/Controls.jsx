@@ -52,6 +52,15 @@ const ParticipantsIcon = () => (
   </svg>
 );
 
+const HandIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 11V6a2 2 0 0 0-4 0v4" />
+    <path d="M14 10V4a2 2 0 0 0-4 0v8" />
+    <path d="M10 12V6a2 2 0 0 0-4 0v8" />
+    <path d="M6 14v-2a2 2 0 0 0-4 0v3a7 7 0 0 0 7 7h4a7 7 0 0 0 7-7v-4a2 2 0 0 0-4 0" />
+  </svg>
+);
+
 const LeaveIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
@@ -67,9 +76,11 @@ const SettingsIcon = () => (
 
 export function Controls({
   isMuted, isVideoOff, isScreenSharing, isRecording,
+  isHandRaised = false,
   hasAudioTrack = true, hasVideoTrack = true, // false when no mic/camera was ever captured
   canShareScreen, // false when the max concurrent screen-share limit is reached
   onToggleMute, onToggleVideo, onToggleScreen,
+  onToggleHand,
   onLeave, onToggleChat, onToggleParticipants, onToggleRecording,
   showChat, showParticipants, showRecording, unreadCount,
   isHost, onMuteAll,
@@ -174,9 +185,19 @@ export function Controls({
 
         <div className="ctrl-divider" />
 
+        {/* Raise hand */}
+        <button
+          className={`ctrl-btn mobile-overflow-action ${isHandRaised ? 'active-hand' : ''}`}
+          onClick={onToggleHand}
+          title={isHandRaised ? 'Lower hand' : 'Raise hand'}
+        >
+          <HandIcon />
+          <span className="mobile-label">{isHandRaised ? 'Lower' : 'Hand'}</span>
+        </button>
+
         {/* Record */}
         <button
-          className={`ctrl-btn ${isRecording ? 'active-rec' : ''} ${showRecording ? 'active' : ''}`}
+          className={`ctrl-btn mobile-overflow-action ${isRecording ? 'active-rec' : ''} ${showRecording ? 'active' : ''}`}
           onClick={onToggleRecording}
           title="Recording"
         >
@@ -186,14 +207,14 @@ export function Controls({
         </button>
 
         {/* Chat */}
-        <button className={`ctrl-btn ${showChat ? 'active' : ''}`} onClick={onToggleChat} title="Chat">
+        <button className={`ctrl-btn mobile-overflow-action ${showChat ? 'active' : ''}`} onClick={onToggleChat} title="Chat">
           <ChatIcon />
           {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
           <span className="mobile-label">Chat</span>
         </button>
 
         {/* Participants */}
-        <button className={`ctrl-btn ${showParticipants ? 'active' : ''}`} onClick={onToggleParticipants} title="Participants">
+        <button className={`ctrl-btn mobile-overflow-action ${showParticipants ? 'active' : ''}`} onClick={onToggleParticipants} title="Participants">
           <ParticipantsIcon />
           <span className="mobile-label">People</span>
         </button>
@@ -225,6 +246,51 @@ export function Controls({
     {/* Settings panel lives outside the scrollable controls bar so mobile browsers do not clip it. */}
     {showSettings && (
       <div className="settings-panel">
+        <div className="settings-quick-actions">
+          <button
+            type="button"
+            className={`settings-quick-btn ${isHandRaised ? 'active-hand' : ''}`}
+            onClick={onToggleHand}
+          >
+            <HandIcon />
+            <span>{isHandRaised ? 'Lower hand' : 'Raise hand'}</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-quick-btn ${isRecording || showRecording ? 'active-rec' : ''}`}
+            onClick={onToggleRecording}
+          >
+            <RecordIcon active={isRecording} />
+            <span>{isRecording ? 'Recording' : 'Record'}</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-quick-btn ${showChat ? 'active' : ''}`}
+            onClick={onToggleChat}
+          >
+            <ChatIcon />
+            <span>Chat{unreadCount > 0 ? ` (${unreadCount})` : ''}</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-quick-btn ${showParticipants ? 'active' : ''}`}
+            onClick={onToggleParticipants}
+          >
+            <ParticipantsIcon />
+            <span>People</span>
+          </button>
+          {isHost && (
+            <button
+              type="button"
+              className="settings-quick-btn"
+              onClick={onMuteAll}
+            >
+              <MicIcon muted />
+              <span>Mute all</span>
+            </button>
+          )}
+        </div>
+
         <h3>Device Settings</h3>
 
         <label>Microphone</label>

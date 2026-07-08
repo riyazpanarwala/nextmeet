@@ -595,6 +595,21 @@ select option { background: var(--surface2); }
   border-radius: 20px;
 }
 
+.tile-hand-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  background: rgba(250,204,21,0.92);
+  color: #111827;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
 /* ═══════════════════════════════════════════
    CONTROLS BAR
    ═══════════════════════════════════════════ */
@@ -638,6 +653,7 @@ select option { background: var(--surface2); }
 .ctrl-btn.active { border-color: var(--accent); background: rgba(59,130,246,0.12); color: var(--accent); }
 .ctrl-btn.active-danger { border-color: var(--red); background: rgba(239,68,68,0.1); color: var(--red); }
 .ctrl-btn.active-green { border-color: var(--green); background: rgba(34,197,94,0.1); color: var(--green); }
+.ctrl-btn.active-hand { border-color: rgba(250,204,21,0.38); background: rgba(250,204,21,0.12); color: #fbbf24; }
 
 .badge {
   position: absolute;
@@ -723,6 +739,39 @@ select option { background: var(--surface2); }
 .settings-action-btn:hover {
   background: var(--accent);
   color: white;
+}
+.settings-quick-actions {
+  display: none;
+}
+.settings-quick-btn {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.18s;
+}
+.settings-quick-btn.active,
+.settings-quick-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.settings-quick-btn.active-hand {
+  border-color: rgba(250,204,21,0.38);
+  background: rgba(250,204,21,0.12);
+  color: #fbbf24;
+}
+.settings-quick-btn.active-rec {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.1);
+  color: var(--red);
 }
 
 /* ═══════════════════════════════════════════
@@ -875,6 +924,7 @@ select option { background: var(--surface2); }
 }
 .participant-badges { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
 .badge-host { font-size: 9px; font-weight: 700; background: rgba(59,130,246,0.2); color: var(--accent); padding: 1px 6px; border-radius: 4px; text-transform: uppercase; }
+.badge-hand { font-size: 9px; font-weight: 700; background: rgba(250,204,21,0.18); color: #fbbf24; padding: 1px 6px; border-radius: 4px; }
 .badge-muted { font-size: 9px; background: rgba(239,68,68,0.15); color: var(--red); padding: 1px 6px; border-radius: 4px; }
 .badge-video { font-size: 9px; background: rgba(100,116,139,0.2); color: var(--text-muted); padding: 1px 6px; border-radius: 4px; }
 
@@ -1105,30 +1155,36 @@ select option { background: var(--surface2); }
   .tile-label { padding: 6px 8px; }
   .tile-name { font-size: 11px; }
 
-  /* ── Controls bar: horizontal scrollable row ── */
+  /* ── Controls bar: primary actions only ── */
   .controls-bar {
     padding: 0 8px;
     height: var(--ctrl-h);
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: hidden;
-    /* hide scrollbar but keep scrollability */
-    scrollbar-width: none;
   }
-  .controls-bar::-webkit-scrollbar { display: none; }
   .controls-left  { display: none; }
   .controls-right { display: none; }
   .controls-center {
-    gap: 4px;
+    gap: 6px;
     width: 100%;
-    justify-content: space-around;
+    min-width: 0;
+    justify-content: space-between;
   }
+  .mobile-overflow-action { display: none; }
   .ctrl-btn {
-    padding: 8px;
+    flex: 0 0 48px;
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    min-height: 48px;
+    padding: 7px 4px;
     flex-direction: column;
     gap: 3px;
     font-size: 10px;
-    min-width: 44px;
     border-radius: var(--radius-sm);
+  }
+  .ctrl-btn svg {
+    flex: 0 0 auto;
   }
   /* Show short labels under icons on mobile */
   .ctrl-btn .mobile-label {
@@ -1136,13 +1192,35 @@ select option { background: var(--surface2); }
     font-size: 9px;
     color: inherit;
     line-height: 1;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .leave-btn {
-    padding: 8px;
+    flex: 0 0 52px;
+    width: 52px;
+    min-width: 52px;
+    max-width: 52px;
+    padding: 7px 4px;
     flex-direction: column;
     gap: 3px;
   }
-  .leave-btn span { display: block; font-size: 9px; }
+  .leave-btn span {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    line-height: 1;
+  }
+  .settings-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 6px;
+  }
 
   /* ── Side panels: full-screen slide-up sheets ── */
   .side-panel {
@@ -1222,8 +1300,17 @@ select option { background: var(--surface2); }
    ═══════════════════════════════════════════ */
 @media (max-width: 380px) {
   .ctrl-btn {
-    min-width: 38px;
-    padding: 6px;
+    flex-basis: 44px;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    padding: 6px 3px;
+  }
+  .leave-btn {
+    flex-basis: 48px;
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
   }
   .ctrl-btn svg { width: 18px; height: 18px; }
   .ctrl-btn .mobile-label { display: none; }
