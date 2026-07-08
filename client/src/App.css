@@ -166,7 +166,11 @@ select option { background: var(--surface2); }
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding-bottom: 84px;
   color: var(--text-muted);
 }
 .preview-off span {
@@ -1057,6 +1061,18 @@ select option { background: var(--surface2); }
     height: clamp(180px, 42vw, 220px);
     min-height: 180px;
     border-radius: var(--radius);
+  }
+  .preview-off {
+    gap: 6px;
+    padding-bottom: 76px;
+  }
+  .preview-off span {
+    width: 58px;
+    height: 58px;
+    font-size: 24px;
+  }
+  .preview-off p {
+    font-size: 12px;
   }
   .lobby-form {
     flex: 0 0 auto;
