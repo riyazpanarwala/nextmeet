@@ -1033,6 +1033,7 @@ select option { background: var(--surface2); }
   .lobby {
     align-items: flex-start;
     justify-content: flex-start;
+    width: 100%;
     padding-top: 0;
     height: auto;
     min-height: 100dvh;
@@ -1040,25 +1041,26 @@ select option { background: var(--surface2); }
   }
   .lobby-card {
     flex-direction: column;
-    padding: 20px 16px 32px;
-    gap: 20px;
+    width: 100%;
+    min-height: 100dvh;
+    padding: max(20px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
+    gap: 18px;
     max-width: 100%;
     margin: 0;
     border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-top: none;
-    min-height: auto;
+    border: none;
     overflow: visible;
   }
   .lobby-preview {
     flex: 0 0 auto;
-    height: 190px;
-    min-height: 190px;
+    width: 100%;
+    height: clamp(180px, 42vw, 220px);
+    min-height: 180px;
     border-radius: var(--radius);
   }
   .lobby-form {
     flex: 0 0 auto;
+    width: 100%;
   }
   .lobby-preview video { object-position: center top; }
   .lobby-form h1 { font-size: 22px; }
