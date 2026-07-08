@@ -7,6 +7,8 @@ import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { RecordingPanel } from './RecordingPanel';
 
+const MAX_SCREEN_SHARES = 2;
+
 export function Room({ socket, localInfo, mediaState, onLeave }) {
   const {
     localStream, localStreamRef, screenStreamRef,
@@ -19,6 +21,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   } = mediaState;
 
   const [remoteParticipants, setRemoteParticipants] = useState({});
+  const [remoteScreenShares, setRemoteScreenShares] = useState({}); // socketId -> MediaStream
+  const [activeSharerIds, setActiveSharerIds] = useState(new Set()); // socketIds currently sharing (remote + tracked for local too)
   const [messages, setMessages] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showChat, setShowChat] = useState(false);
@@ -41,13 +45,19 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   useEffect(() => { localSocketIdRef.current = localSocketId; }, [localSocketId]);
   useEffect(() => { showChatRef.current = showChat; }, [showChat]);
 
+  // Screen-share refs (avoid stale closures in socket handlers)
+  const remoteParticipantsRef = useRef(remoteParticipants);
+  useEffect(() => { remoteParticipantsRef.current = remoteParticipants; }, [remoteParticipants]);
+  const isScreenSharingRef = useRef(false);
+  const screenTrackRef = useRef(null);
+
   // ── Recording hook ──────────────────────────────────────────────
   const {
     isRecording, recordingDuration, lastBlob,
     startRecording, stopRecording, downloadRecording, clearRecording,
   } = useRecording();
 
-  // ── Remote stream / peer left ────────────────────────────────────
+  // ── Remote stream / peer left (camera) ───────────────────────────
   const handleRemoteStream = useCallback((socketId, stream) => {
     setRemoteParticipants((prev) => ({
       ...prev,
@@ -63,17 +73,34 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     });
   }, []);
 
+  // ── Remote screen stream / screen peer left ──────────────────────
+  const handleRemoteScreenStream = useCallback((socketId, stream) => {
+    setRemoteScreenShares((prev) => ({ ...prev, [socketId]: stream }));
+  }, []);
+
+  const handleScreenPeerLeft = useCallback((socketId) => {
+    setRemoteScreenShares((prev) => {
+      const next = { ...prev };
+      delete next[socketId];
+      return next;
+    });
+  }, []);
+
   const {
     makeOffer, handleOffer, handleAnswer,
     handleIceCandidate, closePeer, closeAll, replaceTrack,
+    makeScreenOffer, handleScreenOffer, handleScreenAnswer,
+    handleScreenIceCandidate, closeScreenPeer, closeAllScreenPeers,
   } = usePeerConnections({
     socket,
     localStreamRef,
     onRemoteStream: handleRemoteStream,
     onPeerLeft: handlePeerLeft,
+    onRemoteScreenStream: handleRemoteScreenStream,
+    onScreenPeerLeft: handleScreenPeerLeft,
   });
 
-  // Stable refs for WebRTC fns
+  // Stable refs for WebRTC fns (camera)
   const makeOfferRef = useRef(makeOffer);
   const handleOfferRef = useRef(handleOffer);
   const handleAnswerRef = useRef(handleAnswer);
@@ -87,11 +114,23 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   useEffect(() => { closePeerRef.current = closePeer; }, [closePeer]);
   useEffect(() => { handlePeerLeftRef.current = handlePeerLeft; }, [handlePeerLeft]);
 
+  // Stable refs for WebRTC fns (screen)
+  const makeScreenOfferRef = useRef(makeScreenOffer);
+  const handleScreenOfferRef = useRef(handleScreenOffer);
+  const handleScreenAnswerRef = useRef(handleScreenAnswer);
+  const handleScreenIceCandidateRef = useRef(handleScreenIceCandidate);
+  const closeScreenPeerRef = useRef(closeScreenPeer);
+  useEffect(() => { makeScreenOfferRef.current = makeScreenOffer; }, [makeScreenOffer]);
+  useEffect(() => { handleScreenOfferRef.current = handleScreenOffer; }, [handleScreenOffer]);
+  useEffect(() => { handleScreenAnswerRef.current = handleScreenAnswer; }, [handleScreenAnswer]);
+  useEffect(() => { handleScreenIceCandidateRef.current = handleScreenIceCandidate; }, [handleScreenIceCandidate]);
+  useEffect(() => { closeScreenPeerRef.current = closeScreenPeer; }, [closeScreenPeer]);
+
   // ── Register socket listeners ONCE, then emit join-room ─────────
   useEffect(() => {
     if (!socket) return;
 
-    const onRoomJoined = ({ socketId, isHost: amHost, participants }) => {
+    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds }) => {
       console.log('[Room] room-joined', socketId, 'host:', amHost, 'peers:', participants.length);
       setLocalSocketId(socketId);
       localSocketIdRef.current = socketId;
@@ -117,6 +156,12 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           makeOfferRef.current(p.socketId);
         });
       }
+
+      // Track who's already sharing when we join — their screen offer
+      // will arrive shortly since the sharer re-offers on 'user-joined'.
+      if (screenSharingSocketIds?.length) {
+        setActiveSharerIds(new Set(screenSharingSocketIds));
+      }
     };
 
     const onUserJoined = ({ socketId, name, isHost: theirHost, isMuted: theirMuted, isVideoOff: theirVideoOff }) => {
@@ -131,6 +176,12 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           isVideoOff: Boolean(theirVideoOff),
         },
       }));
+
+      // If I'm currently sharing my screen, extend that share to the newcomer
+      if (isScreenSharingRef.current && screenTrackRef.current) {
+        console.log('[Room] Extending active screen share to newcomer:', socketId);
+        makeScreenOfferRef.current(socketId, screenTrackRef.current);
+      }
     };
 
     const onRoomFull = ({ max }) => {
@@ -138,24 +189,47 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       setRoomFullError(true);
     };
 
-    const onOffer = async ({ from, offer }) => {
-      console.log('[Room] received offer from:', from);
-      await handleOfferRef.current(from, offer);
+    const onOffer = async ({ from, offer, kind }) => {
+      console.log('[Room] received offer from:', from, 'kind:', kind || 'camera');
+      if (kind === 'screen') {
+        await handleScreenOfferRef.current(from, offer);
+      } else {
+        await handleOfferRef.current(from, offer);
+      }
     };
 
-    const onAnswer = async ({ from, answer }) => {
-      console.log('[Room] received answer from:', from);
-      await handleAnswerRef.current(from, answer);
+    const onAnswer = async ({ from, answer, kind }) => {
+      console.log('[Room] received answer from:', from, 'kind:', kind || 'camera');
+      if (kind === 'screen') {
+        await handleScreenAnswerRef.current(from, answer);
+      } else {
+        await handleAnswerRef.current(from, answer);
+      }
     };
 
-    const onIceCandidate = async ({ from, candidate }) => {
-      await handleIceCandidateRef.current(from, candidate);
+    const onIceCandidate = async ({ from, candidate, kind }) => {
+      if (kind === 'screen') {
+        await handleScreenIceCandidateRef.current(from, candidate);
+      } else {
+        await handleIceCandidateRef.current(from, candidate);
+      }
     };
 
     const onUserLeft = ({ socketId }) => {
       console.log('[Room] user-left:', socketId);
       closePeerRef.current(socketId);
+      closeScreenPeerRef.current(socketId);
       handlePeerLeftRef.current(socketId);
+      setRemoteScreenShares((prev) => {
+        const next = { ...prev };
+        delete next[socketId];
+        return next;
+      });
+      setActiveSharerIds((prev) => {
+        const next = new Set(prev);
+        next.delete(socketId);
+        return next;
+      });
     };
 
     const onPeerMediaState = ({ socketId, isMuted: m, isVideoOff: v }) => {
@@ -170,6 +244,22 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         ...prev,
         [socketId]: { ...(prev[socketId] || {}), isScreenSharing: sharing },
       }));
+
+      setActiveSharerIds((prev) => {
+        const next = new Set(prev);
+        if (sharing) next.add(socketId);
+        else next.delete(socketId);
+        return next;
+      });
+
+      if (!sharing) {
+        closeScreenPeerRef.current(socketId);
+        setRemoteScreenShares((prev) => {
+          const next = { ...prev };
+          delete next[socketId];
+          return next;
+        });
+      }
     };
 
     const onChatMessage = (msg) => {
@@ -276,26 +366,57 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     });
   }, [socket, localInfo, localStreamRef, toggleVideo]);
 
+  // ── Screen sharing (Approach B: dedicated peer connections per share) ──
+  // Camera PCs are never touched here — the sharer's own camera tile
+  // stays visible the whole time, and a separate screen tile is added.
   const handleToggleScreen = useCallback(async () => {
     if (isScreenSharing) {
+      // ── Stop sharing ──
       stopScreenShare();
-      const camTrack = localStreamRef.current?.getVideoTracks()[0];
-      if (camTrack) await replaceTrack(camTrack, camTrack);
       socket.emit('screen-share-stopped', { roomId: localInfo.roomId });
-    } else {
-      try {
-        const screenStream = await startScreenShare();
-        const screenTrack = screenStream.getVideoTracks()[0];
-        const camTrack = localStreamRef.current?.getVideoTracks()[0];
-        if (camTrack) await replaceTrack(camTrack, screenTrack);
-        screenSenderRef.current = screenTrack;
-        socket.emit('screen-share-started', { roomId: localInfo.roomId });
-        screenTrack.onended = () => handleToggleScreen();
-      } catch (err) {
-        console.error('Screen share failed:', err);
-      }
+      Object.keys(remoteParticipantsRef.current).forEach((id) => {
+        closeScreenPeerRef.current(id);
+      });
+      isScreenSharingRef.current = false;
+      screenTrackRef.current = null;
+      screenSenderRef.current = null;
+      return;
     }
-  }, [isScreenSharing, startScreenShare, stopScreenShare, replaceTrack, socket, localInfo, localStreamRef]);
+
+    // Client-side pre-check for instant feedback — server is still
+    // the source of truth and will reject via the ack if this is stale.
+    if (activeSharerIds.size >= MAX_SCREEN_SHARES) {
+      alert(`Only ${MAX_SCREEN_SHARES} people can share their screen at the same time. Please wait for a slot to free up.`);
+      return;
+    }
+
+    try {
+      const screenStream = await startScreenShare();
+      const screenTrack = screenStream.getVideoTracks()[0];
+
+      socket.emit('screen-share-started', { roomId: localInfo.roomId }, (res) => {
+        if (!res?.ok) {
+          stopScreenShare();
+          alert(`Only ${res?.max ?? MAX_SCREEN_SHARES} people can share their screen at once. Please try again shortly.`);
+          return;
+        }
+
+        isScreenSharingRef.current = true;
+        screenTrackRef.current = screenTrack;
+        screenSenderRef.current = screenTrack;
+
+        // Send this screen track to every current remote participant
+        Object.keys(remoteParticipantsRef.current).forEach((id) => {
+          makeScreenOfferRef.current(id, screenTrack);
+        });
+      });
+
+      screenTrack.onended = () => handleToggleScreen();
+    } catch (err) {
+      console.error('Screen share failed:', err);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isScreenSharing, startScreenShare, stopScreenShare, socket, localInfo, activeSharerIds]);
 
   const handleSendMessage = useCallback(
     (text) => socket.emit('chat-message', { roomId: localInfo.roomId, message: text }),
@@ -304,10 +425,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
   const doLeave = useCallback(() => {
     if (isRecording) stopRecording();
+    if (isScreenSharingRef.current) {
+      socket.emit('screen-share-stopped', { roomId: localInfo.roomId });
+    }
     closeAll();
+    closeAllScreenPeers();
     stopAll();
     onLeave();
-  }, [isRecording, stopRecording, closeAll, stopAll, onLeave]);
+  }, [isRecording, stopRecording, closeAll, closeAllScreenPeers, stopAll, onLeave, socket, localInfo]);
 
   const handleMuteAll = useCallback(() => {
     socket.emit('mute-all', { roomId: localInfo.roomId });
@@ -337,27 +462,52 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     if (showParticipants) setShowParticipants(false);
   };
 
-  // Build participant list for recording
+  // Build participant list (camera tiles only — screen shares are separate)
   const allParticipants = [
     {
       socketId: localSocketId,
-      stream: isScreenSharing ? screenStreamRef.current : localStream,
+      stream: localStream,
       name: localInfo.name,
       isHost,
       isMuted,
       isVideoOff,
       isLocal: true,
-      isScreenShare: isScreenSharing,
+      isScreenShare: false,
     },
     ...Object.entries(remoteParticipants).map(([id, data]) => ({
       socketId: id,
       ...data,
       isLocal: false,
+      isScreenShare: false,
+    })),
+  ];
+
+  // Build screen-share tile list (local + remote), rendered separately
+  // and full-width via the existing .video-tile.screen-share CSS class.
+  const screenTiles = [
+    ...(isScreenSharing
+      ? [{
+          socketId: `${localSocketId}-screen`,
+          stream: screenStreamRef.current,
+          name: localInfo.name,
+          isLocal: true,
+          isScreenShare: true,
+        }]
+      : []),
+    ...Object.entries(remoteScreenShares).map(([id, stream]) => ({
+      socketId: `${id}-screen`,
+      stream,
+      name: remoteParticipants[id]?.name || 'Participant',
+      isLocal: false,
+      isScreenShare: true,
     })),
   ];
 
   const count = allParticipants.length;
   const cols = count === 1 ? 1 : count <= 4 ? 2 : 3;
+
+  // Whether the local user is still allowed to start a new share
+  const canShareScreen = isScreenSharing || activeSharerIds.size < MAX_SCREEN_SHARES;
 
   // ── Room Full overlay ────────────────────────────────────────────
   if (roomFullError) {
@@ -405,6 +555,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             </svg>
             {count}/6
           </span>
+          {activeSharerIds.size > 0 && (
+            <span className="participant-count-tag" title="Active screen shares">
+              🖥️ {activeSharerIds.size}/{MAX_SCREEN_SHARES}
+            </span>
+          )}
           <span className="room-id-tag">Room: {localInfo.roomId}</span>
           <button
             className="copy-room-btn"
@@ -417,13 +572,24 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
       <div className="room-body">
         <div className="video-grid" style={{ '--grid-cols': cols }}>
+          {/* Screen-share tiles first — full width per existing CSS */}
+          {screenTiles.map((p) => (
+            <VideoTile
+              key={p.socketId}
+              stream={p.stream}
+              participant={p}
+              isLocal={p.isLocal}
+              isScreenShare
+            />
+          ))}
+
           {allParticipants.map((p) => (
             <VideoTile
               key={p.socketId}
               stream={p.stream}
               participant={p}
               isLocal={p.isLocal}
-              isScreenShare={p.isScreenShare}
+              isScreenShare={false}
             />
           ))}
         </div>
@@ -458,7 +624,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             participantCount={count}
             onStart={() =>
               startRecording(
-                allParticipants.map((p) => ({
+                [...screenTiles, ...allParticipants].map((p) => ({
                   name: p.name,
                   stream: p.stream,
                   isLocal: p.isLocal,
@@ -477,6 +643,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         isVideoOff={isVideoOff}
         isScreenSharing={isScreenSharing}
         isRecording={isRecording}
+        canShareScreen={canShareScreen}
         onToggleMute={handleToggleMute}
         onToggleVideo={handleToggleVideo}
         onToggleScreen={handleToggleScreen}

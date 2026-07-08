@@ -19,6 +19,10 @@ const io = new Server(server, {
 const rooms = new Map();
 const MAX_PARTICIPANTS = 6;
 
+// roomId -> Set<socketId> currently screen-sharing
+const roomScreenShares = new Map();
+const MAX_SCREEN_SHARES = 2;
+
 function getRoomParticipants(roomId) {
   const room = rooms.get(roomId);
   if (!room) return [];
@@ -26,6 +30,11 @@ function getRoomParticipants(roomId) {
     socketId,
     ...data,
   }));
+}
+
+function getScreenShareSet(roomId) {
+  if (!roomScreenShares.has(roomId)) roomScreenShares.set(roomId, new Set());
+  return roomScreenShares.get(roomId);
 }
 
 io.on('connection', (socket) => {
@@ -60,10 +69,16 @@ io.on('connection', (socket) => {
     const others = getRoomParticipants(roomId).filter(
       (p) => p.socketId !== socket.id
     );
+
+    // Let the new joiner know who is already screen-sharing so they
+    // can render placeholders / expect incoming screen offers.
+    const screenSharingSocketIds = Array.from(getScreenShareSet(roomId));
+
     socket.emit('room-joined', {
       socketId: socket.id,
       isHost,
       participants: others,
+      screenSharingSocketIds,
     });
 
     // Notify everyone else about the new user
@@ -77,16 +92,19 @@ io.on('connection', (socket) => {
   });
 
   // ─── WEBRTC SIGNALING ────────────────────────────────────────
-  socket.on('offer', ({ to, offer }) => {
-    io.to(to).emit('offer', { from: socket.id, offer });
+  // `kind` distinguishes camera connections from screen-share connections
+  // ('camera' | 'screen'). Undefined/omitted is treated as 'camera' by
+  // the client for backwards compatibility.
+  socket.on('offer', ({ to, offer, kind }) => {
+    io.to(to).emit('offer', { from: socket.id, offer, kind });
   });
 
-  socket.on('answer', ({ to, answer }) => {
-    io.to(to).emit('answer', { from: socket.id, answer });
+  socket.on('answer', ({ to, answer, kind }) => {
+    io.to(to).emit('answer', { from: socket.id, answer, kind });
   });
 
-  socket.on('ice-candidate', ({ to, candidate }) => {
-    io.to(to).emit('ice-candidate', { from: socket.id, candidate });
+  socket.on('ice-candidate', ({ to, candidate, kind }) => {
+    io.to(to).emit('ice-candidate', { from: socket.id, candidate, kind });
   });
 
   // ─── MEDIA STATE UPDATES ─────────────────────────────────────
@@ -103,19 +121,41 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ─── SCREEN SHARE ────────────────────────────────────────────
-  socket.on('screen-share-started', ({ roomId }) => {
+  // ─── SCREEN SHARE (max MAX_SCREEN_SHARES concurrent per room) ─
+  socket.on('screen-share-started', ({ roomId }, callback) => {
+    const shares = getScreenShareSet(roomId);
+
+    // Already sharing (e.g. re-offer to a late joiner) — allow, no-op on the set.
+    if (shares.has(socket.id)) {
+      if (typeof callback === 'function') callback({ ok: true });
+      return;
+    }
+
+    if (shares.size >= MAX_SCREEN_SHARES) {
+      console.log(`[!] Screen share denied in ${roomId} — limit (${MAX_SCREEN_SHARES}) reached`);
+      if (typeof callback === 'function') {
+        callback({ ok: false, max: MAX_SCREEN_SHARES });
+      }
+      return;
+    }
+
+    shares.add(socket.id);
     socket.to(roomId).emit('peer-screen-share', {
       socketId: socket.id,
       sharing: true,
     });
+    console.log(`[+] ${socket.id} started screen share in ${roomId} (${shares.size}/${MAX_SCREEN_SHARES})`);
+    if (typeof callback === 'function') callback({ ok: true });
   });
 
   socket.on('screen-share-stopped', ({ roomId }) => {
+    const shares = roomScreenShares.get(roomId);
+    shares?.delete(socket.id);
     socket.to(roomId).emit('peer-screen-share', {
       socketId: socket.id,
       sharing: false,
     });
+    console.log(`[-] ${socket.id} stopped screen share in ${roomId}`);
   });
 
   // ─── CHAT ────────────────────────────────────────────────────
@@ -149,6 +189,7 @@ io.on('connection', (socket) => {
     if (target) {
       target.leave(roomId);
       room?.delete(targetSocketId);
+      roomScreenShares.get(roomId)?.delete(targetSocketId);
       io.to(roomId).emit('user-left', { socketId: targetSocketId });
     }
   });
@@ -159,11 +200,20 @@ io.on('connection', (socket) => {
       if (roomId === socket.id) continue;
       const room = rooms.get(roomId);
       if (!room) continue;
+
+      // Release this socket's screen-share slot, if any, and notify peers.
+      const shares = roomScreenShares.get(roomId);
+      if (shares?.has(socket.id)) {
+        shares.delete(socket.id);
+        socket.to(roomId).emit('peer-screen-share', { socketId: socket.id, sharing: false });
+      }
+
       const leaving = room.get(socket.id);
       room.delete(socket.id);
 
       if (room.size === 0) {
         rooms.delete(roomId);
+        roomScreenShares.delete(roomId);
       } else if (leaving?.isHost) {
         // Transfer host to next participant
         const [newHostId, newHostData] = room.entries().next().value;
@@ -186,7 +236,13 @@ app.get('/health', (_, res) => res.json({ status: 'ok' }));
 app.get('/room/:roomId/info', (req, res) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return res.json({ exists: false, count: 0 });
-  res.json({ exists: true, count: room.size });
+  const shares = roomScreenShares.get(req.params.roomId);
+  res.json({
+    exists: true,
+    count: room.size,
+    screenSharesActive: shares ? shares.size : 0,
+    maxScreenShares: MAX_SCREEN_SHARES,
+  });
 });
 
 const PORT = process.env.PORT || 3001;

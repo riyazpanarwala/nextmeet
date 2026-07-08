@@ -8,11 +8,26 @@ const ICE_SERVERS = [
   // { urls: 'turn:your-server:3478', username: 'user', credential: 'pass' },
 ];
 
-export function usePeerConnections({ socket, localStreamRef, onRemoteStream, onPeerLeft }) {
-  // socketId -> RTCPeerConnection
+export function usePeerConnections({
+  socket,
+  localStreamRef,
+  onRemoteStream,
+  onPeerLeft,
+  onRemoteScreenStream,
+  onScreenPeerLeft,
+}) {
+  // socketId -> RTCPeerConnection (camera/mic)
   const peerConnections = useRef({});
   // socketId -> RTCIceCandidate[] (queued before remoteDescription is set)
   const iceCandidateQueues = useRef({});
+
+  // socketId -> RTCPeerConnection (dedicated screen-share connection)
+  const screenPeerConnections = useRef({});
+  const screenIceCandidateQueues = useRef({});
+
+  // ══════════════════════════════════════════════════════════════
+  // CAMERA / MIC PEER CONNECTIONS
+  // ══════════════════════════════════════════════════════════════
 
   const createPeerConnection = useCallback(
     (remoteSocketId) => {
@@ -37,7 +52,7 @@ export function usePeerConnections({ socket, localStreamRef, onRemoteStream, onP
       // ── ICE candidate trickle ──
       pc.onicecandidate = ({ candidate }) => {
         if (candidate) {
-          socket.emit('ice-candidate', { to: remoteSocketId, candidate });
+          socket.emit('ice-candidate', { to: remoteSocketId, candidate, kind: 'camera' });
         }
       };
 
@@ -111,7 +126,7 @@ export function usePeerConnections({ socket, localStreamRef, onRemoteStream, onP
         });
         await pc.setLocalDescription(offer);
         console.log('[PC] Sending offer to:', remoteSocketId);
-        socket.emit('offer', { to: remoteSocketId, offer: pc.localDescription });
+        socket.emit('offer', { to: remoteSocketId, offer: pc.localDescription, kind: 'camera' });
       } catch (err) {
         console.error('[PC] makeOffer error:', err);
       }
@@ -131,7 +146,7 @@ export function usePeerConnections({ socket, localStreamRef, onRemoteStream, onP
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         console.log('[PC] Sending answer to:', remoteSocketId);
-        socket.emit('answer', { to: remoteSocketId, answer: pc.localDescription });
+        socket.emit('answer', { to: remoteSocketId, answer: pc.localDescription, kind: 'camera' });
       } catch (err) {
         console.error('[PC] handleOffer error:', err);
       }
@@ -200,6 +215,160 @@ export function usePeerConnections({ socket, localStreamRef, onRemoteStream, onP
     await Promise.all(promises);
   }, []);
 
+  // ══════════════════════════════════════════════════════════════
+  // SCREEN-SHARE PEER CONNECTIONS (dedicated, separate from camera PCs)
+  //
+  // Each screen share gets its own RTCPeerConnection per remote peer.
+  // The SHARER creates a send-only PC per viewer (Approach B). Viewers
+  // create a receive-only PC on offer. This keeps the camera PC fully
+  // untouched — the sharer's own camera tile never disappears — and
+  // avoids needing renegotiation/mid-tracking on the camera connection.
+  // ══════════════════════════════════════════════════════════════
+
+  const createScreenPeerConnection = useCallback(
+    (remoteSocketId, isSender, screenTrack) => {
+      if (screenPeerConnections.current[remoteSocketId]) {
+        return screenPeerConnections.current[remoteSocketId];
+      }
+
+      console.log('[ScreenPC] Creating screen peer connection for:', remoteSocketId, isSender ? '(sender)' : '(receiver)');
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      screenIceCandidateQueues.current[remoteSocketId] = [];
+
+      if (isSender && screenTrack) {
+        pc.addTrack(screenTrack);
+      }
+
+      pc.onicecandidate = ({ candidate }) => {
+        if (candidate) {
+          socket.emit('ice-candidate', { to: remoteSocketId, candidate, kind: 'screen' });
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        console.log('[ScreenPC] Connection state:', state, 'for', remoteSocketId);
+        if (state === 'failed') {
+          pc.restartIce();
+        }
+        if (state === 'disconnected' || state === 'closed') {
+          onScreenPeerLeft?.(remoteSocketId);
+        }
+      };
+
+      const remoteStream = new MediaStream();
+      pc.ontrack = ({ track, streams }) => {
+        console.log('[ScreenPC] Got remote screen track from', remoteSocketId);
+        if (streams && streams[0]) {
+          onRemoteScreenStream(remoteSocketId, streams[0]);
+        } else {
+          remoteStream.addTrack(track);
+          onRemoteScreenStream(remoteSocketId, remoteStream);
+        }
+      };
+
+      screenPeerConnections.current[remoteSocketId] = pc;
+      return pc;
+    },
+    [socket, onRemoteScreenStream, onScreenPeerLeft]
+  );
+
+  const drainScreenIceQueue = useCallback(async (remoteSocketId) => {
+    const pc = screenPeerConnections.current[remoteSocketId];
+    const queue = screenIceCandidateQueues.current[remoteSocketId] || [];
+    if (!pc || queue.length === 0) return;
+
+    console.log('[ScreenPC] Draining', queue.length, 'queued ICE candidates for', remoteSocketId);
+    for (const candidate of queue) {
+      try {
+        await pc.addIceCandidate(candidate);
+      } catch (err) {
+        console.warn('[ScreenPC] Failed to add queued ICE candidate:', err);
+      }
+    }
+    screenIceCandidateQueues.current[remoteSocketId] = [];
+  }, []);
+
+  // Called by the SHARER for each remote participant (existing + late joiners)
+  const makeScreenOffer = useCallback(
+    async (remoteSocketId, screenTrack) => {
+      const pc = createScreenPeerConnection(remoteSocketId, true, screenTrack);
+      try {
+        const offer = await pc.createOffer({ offerToReceiveVideo: false, offerToReceiveAudio: false });
+        await pc.setLocalDescription(offer);
+        console.log('[ScreenPC] Sending screen offer to:', remoteSocketId);
+        socket.emit('offer', { to: remoteSocketId, offer: pc.localDescription, kind: 'screen' });
+      } catch (err) {
+        console.error('[ScreenPC] makeScreenOffer error:', err);
+      }
+    },
+    [createScreenPeerConnection, socket]
+  );
+
+  // Called by VIEWERS when a screen-share offer arrives
+  const handleScreenOffer = useCallback(
+    async (remoteSocketId, offer) => {
+      const pc = createScreenPeerConnection(remoteSocketId, false);
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await drainScreenIceQueue(remoteSocketId);
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log('[ScreenPC] Sending screen answer to:', remoteSocketId);
+        socket.emit('answer', { to: remoteSocketId, answer: pc.localDescription, kind: 'screen' });
+      } catch (err) {
+        console.error('[ScreenPC] handleScreenOffer error:', err);
+      }
+    },
+    [createScreenPeerConnection, drainScreenIceQueue, socket]
+  );
+
+  const handleScreenAnswer = useCallback(async (remoteSocketId, answer) => {
+    const pc = screenPeerConnections.current[remoteSocketId];
+    if (!pc) {
+      console.warn('[ScreenPC] handleScreenAnswer: no PC for', remoteSocketId);
+      return;
+    }
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      await drainScreenIceQueue(remoteSocketId);
+    } catch (err) {
+      console.error('[ScreenPC] handleScreenAnswer error:', err);
+    }
+  }, [drainScreenIceQueue]);
+
+  const handleScreenIceCandidate = useCallback(async (remoteSocketId, candidate) => {
+    const pc = screenPeerConnections.current[remoteSocketId];
+    const rtcCandidate = new RTCIceCandidate(candidate);
+
+    if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
+      screenIceCandidateQueues.current[remoteSocketId] =
+        screenIceCandidateQueues.current[remoteSocketId] || [];
+      screenIceCandidateQueues.current[remoteSocketId].push(rtcCandidate);
+      return;
+    }
+
+    try {
+      await pc.addIceCandidate(rtcCandidate);
+    } catch (err) {
+      console.warn('[ScreenPC] addIceCandidate error:', err);
+    }
+  }, []);
+
+  const closeScreenPeer = useCallback((remoteSocketId) => {
+    const pc = screenPeerConnections.current[remoteSocketId];
+    if (pc) {
+      pc.close();
+      delete screenPeerConnections.current[remoteSocketId];
+      delete screenIceCandidateQueues.current[remoteSocketId];
+    }
+  }, []);
+
+  const closeAllScreenPeers = useCallback(() => {
+    Object.keys(screenPeerConnections.current).forEach(closeScreenPeer);
+  }, [closeScreenPeer]);
+
   return {
     peerConnections: peerConnections.current,
     makeOffer,
@@ -209,5 +378,14 @@ export function usePeerConnections({ socket, localStreamRef, onRemoteStream, onP
     closePeer,
     closeAll,
     replaceTrack,
+
+    // Screen-share pool
+    screenPeerConnections: screenPeerConnections.current,
+    makeScreenOffer,
+    handleScreenOffer,
+    handleScreenAnswer,
+    handleScreenIceCandidate,
+    closeScreenPeer,
+    closeAllScreenPeers,
   };
 }

@@ -67,6 +67,7 @@ const SettingsIcon = () => (
 
 export function Controls({
   isMuted, isVideoOff, isScreenSharing, isRecording,
+  canShareScreen, // NEW — false when the max concurrent screen-share limit is reached
   onToggleMute, onToggleVideo, onToggleScreen,
   onLeave, onToggleChat, onToggleParticipants, onToggleRecording,
   showChat, showParticipants, showRecording, unreadCount,
@@ -78,6 +79,8 @@ export function Controls({
   const handleSettingsToggle = () => {
     setShowSettings((s) => !s);
   };
+
+  const screenShareDisabled = !isScreenSharing && canShareScreen === false;
 
   return (
     <div className="controls-bar">
@@ -100,8 +103,19 @@ export function Controls({
           <span className="mobile-label">{isVideoOff ? 'Start' : 'Stop'}</span>
         </button>
 
-        {/* Screen Share */}
-        <button className={`ctrl-btn ${isScreenSharing ? 'active-green' : ''}`} onClick={onToggleScreen} title={isScreenSharing ? 'Stop Sharing' : 'Share Screen'}>
+        {/* Screen Share — disabled once the concurrent-share cap is reached */}
+        <button
+          className={`ctrl-btn ${isScreenSharing ? 'active-green' : ''}`}
+          onClick={onToggleScreen}
+          disabled={screenShareDisabled}
+          title={
+            isScreenSharing
+              ? 'Stop Sharing'
+              : screenShareDisabled
+              ? 'Screen share limit reached (2 people already sharing)'
+              : 'Share Screen'
+          }
+        >
           <ScreenIcon active={isScreenSharing} />
           <span className="mobile-label">{isScreenSharing ? 'Stop' : 'Share'}</span>
         </button>
