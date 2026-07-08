@@ -28,6 +28,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const [showChat, setShowChat] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const [showRecording, setShowRecording] = useState(false);
+  const [pinnedScreenId, setPinnedScreenId] = useState(null); // user-selected "main" screen share
   const [isHost, setIsHost] = useState(false);
   const [localSocketId, setLocalSocketId] = useState('');
   const [roomFullError, setRoomFullError] = useState(false);
@@ -394,6 +395,12 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       next.delete(localSocketIdRef.current);
       return next;
     });
+
+    // If we were the pinned/primary share, clear the pin so the layout
+    // falls back to whatever is left (single share, split, or grid).
+    setPinnedScreenId((prev) =>
+      prev === `${localSocketIdRef.current}-screen` ? null : prev
+    );
   }, [stopScreenShare, socket, localInfo]);
 
   const handleToggleScreen = useCallback(async () => {
@@ -546,6 +553,31 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const count = allParticipants.length;
   const cols = count === 1 ? 1 : count <= 4 ? 2 : 3;
 
+  // ── Screen-share presentation layout ────────────────────────────
+  // A pin only counts if that screen share is still active.
+  const validPinnedScreenId = screenTiles.some((t) => t.socketId === pinnedScreenId)
+    ? pinnedScreenId
+    : null;
+
+  let mainScreenTiles = [];
+  let sidebarScreenTiles = [];
+  if (screenTiles.length === 1) {
+    // Only one share active — it always owns the main area.
+    mainScreenTiles = screenTiles;
+  } else if (screenTiles.length >= 2) {
+    if (validPinnedScreenId) {
+      // Someone picked a primary — that one goes full-width, the other
+      // active share drops into the sidebar alongside the camera tiles.
+      mainScreenTiles = screenTiles.filter((t) => t.socketId === validPinnedScreenId);
+      sidebarScreenTiles = screenTiles.filter((t) => t.socketId !== validPinnedScreenId);
+    } else {
+      // No one has pinned a primary yet — split the main area vertically
+      // so both shares sit side by side instead of stacking with cameras.
+      mainScreenTiles = screenTiles;
+    }
+  }
+  const hasScreenShare = screenTiles.length > 0;
+
   // Whether the local user is still allowed to start a new share
   const canShareScreen = isScreenSharing || activeSharerIds.size < MAX_SCREEN_SHARES;
 
@@ -611,28 +643,70 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       </div>
 
       <div className="room-body">
-        <div className="video-grid" style={{ '--grid-cols': cols }}>
-          {/* Screen-share tiles first — full width per existing CSS */}
-          {screenTiles.map((p) => (
-            <VideoTile
-              key={p.socketId}
-              stream={p.stream}
-              participant={p}
-              isLocal={p.isLocal}
-              isScreenShare
-            />
-          ))}
+        {hasScreenShare ? (
+          <div className="presentation-layout">
+            {/* Main area — the primary screen share (or both, split, if unpinned) */}
+            <div className={`presentation-main ${mainScreenTiles.length > 1 ? 'split' : ''}`}>
+              {mainScreenTiles.map((p) => (
+                <VideoTile
+                  key={p.socketId}
+                  stream={p.stream}
+                  participant={p}
+                  isLocal={p.isLocal}
+                  isScreenShare
+                  isPrimary={mainScreenTiles.length === 1}
+                  showPrimaryButton={mainScreenTiles.length > 1}
+                  onSetPrimary={() => setPinnedScreenId(p.socketId)}
+                />
+              ))}
+              {validPinnedScreenId && screenTiles.length === 2 && (
+                <button
+                  type="button"
+                  className="presentation-mode-toggle"
+                  onClick={() => setPinnedScreenId(null)}
+                >
+                  Show Side by Side
+                </button>
+              )}
+            </div>
 
-          {allParticipants.map((p) => (
-            <VideoTile
-              key={p.socketId}
-              stream={p.stream}
-              participant={p}
-              isLocal={p.isLocal}
-              isScreenShare={false}
-            />
-          ))}
-        </div>
+            {/* Sidebar — secondary screen share(s) + all camera tiles */}
+            <div className="presentation-sidebar">
+              {sidebarScreenTiles.map((p) => (
+                <VideoTile
+                  key={p.socketId}
+                  stream={p.stream}
+                  participant={p}
+                  isLocal={p.isLocal}
+                  isScreenShare
+                  showPrimaryButton
+                  onSetPrimary={() => setPinnedScreenId(p.socketId)}
+                />
+              ))}
+              {allParticipants.map((p) => (
+                <VideoTile
+                  key={p.socketId}
+                  stream={p.stream}
+                  participant={p}
+                  isLocal={p.isLocal}
+                  isScreenShare={false}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="video-grid" style={{ '--grid-cols': cols }}>
+            {allParticipants.map((p) => (
+              <VideoTile
+                key={p.socketId}
+                stream={p.stream}
+                participant={p}
+                isLocal={p.isLocal}
+                isScreenShare={false}
+              />
+            ))}
+          </div>
+        )}
 
         {showChat && (
           <ChatPanel

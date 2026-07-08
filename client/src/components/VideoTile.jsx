@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAudioLevel } from '../hooks/useAudioLevel';
 
-export function VideoTile({ stream, participant, isLocal, isScreenShare }) {
+export function VideoTile({
+  stream,
+  participant,
+  isLocal,
+  isScreenShare,
+  onSetPrimary,       // called when the user wants this tile to become the main view
+  showPrimaryButton,  // show the "Set as Main" control (only relevant for screen shares)
+  isPrimary,          // this tile IS the current main view — shows a "Presenting" badge
+}) {
   const videoRef = useRef(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
@@ -36,6 +44,30 @@ export function VideoTile({ stream, participant, isLocal, isScreenShare }) {
     >
       {/* Speaking ring */}
       {isSpeaking && <div className="speaking-ring" />}
+
+      {/* "Presenting" badge — this is the current main/full-width tile */}
+      {isPrimary && (
+        <span className="tile-primary-badge">Presenting</span>
+      )}
+
+      {/* "Set as Main" control — shown on non-primary screen shares so the
+          user can promote any active share to the full-width main view */}
+      {showPrimaryButton && (
+        <button
+          type="button"
+          className="tile-pin-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSetPrimary?.();
+          }}
+          title="Show this screen share as the main view"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+          </svg>
+          Set as Main
+        </button>
+      )}
 
       {/* Video */}
       <video

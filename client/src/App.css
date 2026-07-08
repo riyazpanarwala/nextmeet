@@ -463,6 +463,121 @@ select option { background: var(--surface2); }
 }
 
 /* ═══════════════════════════════════════════
+   PRESENTATION LAYOUT (active screen share)
+   ═══════════════════════════════════════════ */
+.presentation-layout {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.presentation-main {
+  position: relative;
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+/* Single tile (a pinned/only screen share) fills the whole main area */
+.presentation-main .video-tile {
+  width: auto;
+  height: 100%;
+  flex: 1;
+  aspect-ratio: auto;
+}
+/* Two unpinned shares split the main area vertically (side by side) */
+.presentation-main.split .video-tile {
+  flex: 1 1 50%;
+}
+
+.presentation-mode-toggle {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgba(15,23,42,0.88);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s;
+}
+.presentation-mode-toggle:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.presentation-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface2) transparent;
+}
+.presentation-sidebar .video-tile {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16/9;
+  flex-shrink: 0;
+}
+
+/* "Set as Main" pin button — appears on hover over a non-primary tile */
+.tile-pin-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 20px;
+  background: rgba(15,23,42,0.85);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+  backdrop-filter: blur(6px);
+}
+.video-tile:hover .tile-pin-btn,
+.video-tile:focus-within .tile-pin-btn {
+  opacity: 1;
+}
+.tile-pin-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* "Presenting" badge on the current main tile */
+.tile-primary-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  background: rgba(59,130,246,0.92);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+/* ═══════════════════════════════════════════
    CONTROLS BAR
    ═══════════════════════════════════════════ */
 .controls-bar {
@@ -843,6 +958,29 @@ select option { background: var(--surface2); }
   .controls-left .room-time { display: none; }
   .leave-btn span { display: none; }
   .controls-right { display: none; }  /* host buttons go into settings on tablet */
+
+  /* Presentation layout: stack sidebar below main */
+  .presentation-layout {
+    flex-direction: column;
+    padding: 8px;
+  }
+  .presentation-main {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .presentation-sidebar {
+    width: 100%;
+    flex-direction: row;
+    height: 110px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .presentation-sidebar .video-tile {
+    width: 160px;
+    height: 100%;
+    aspect-ratio: auto;
+    flex-shrink: 0;
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -992,6 +1130,24 @@ select option { background: var(--surface2); }
 
   /* ── Recording topbar ───────────────── */
   .recording-topbar { font-size: 11px; }
+
+  /* ── Presentation layout on phone ────── */
+  .presentation-sidebar {
+    height: 90px;
+  }
+  .presentation-sidebar .video-tile {
+    width: 130px;
+  }
+  .presentation-mode-toggle {
+    font-size: 11px;
+    padding: 6px 12px;
+    bottom: 10px;
+  }
+  .tile-pin-btn {
+    opacity: 1; /* no hover on touch devices — always visible */
+    padding: 5px 8px;
+    font-size: 10px;
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -1029,6 +1185,9 @@ select option { background: var(--surface2); }
 
   /* Video tiles: no hover effects */
   .participant-item:hover { background: transparent; }
+
+  /* Pin button always visible on touch (no hover state to reveal it) */
+  .tile-pin-btn { opacity: 1; }
 }
 
 /* ═══════════════════════════════════════════
