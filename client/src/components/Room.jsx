@@ -583,6 +583,16 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     }
   }, [localInfo]);
 
+  const handleCopyInviteLink = useCallback(async () => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('room', localInfo.roomId);
+      await navigator.clipboard?.writeText(url.toString());
+    } catch (err) {
+      console.warn('[Room] Could not copy invite link:', err);
+    }
+  }, [localInfo]);
+
   const handleToggleChat = () => {
     setShowChat((s) => !s);
     if (showRecording) setShowRecording(false);
@@ -738,6 +748,12 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             onClick={handleCopyRoomId}
           >
             Copy
+          </button>
+          <button
+            className="copy-room-btn"
+            onClick={handleCopyInviteLink}
+          >
+            Copy Link
           </button>
         </div>
       </div>

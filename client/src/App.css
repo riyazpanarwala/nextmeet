@@ -353,6 +353,7 @@ select option { background: var(--surface2); }
   border: 1px solid var(--border);
   color: var(--text-muted);
   transition: all 0.2s;
+  white-space: nowrap;
 }
 .copy-room-btn:hover { border-color: var(--accent); color: var(--accent); }
 

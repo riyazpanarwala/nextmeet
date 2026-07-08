@@ -7,10 +7,24 @@ import './App.css';
 
 const PHASE = { LOBBY: 'lobby', CONNECTING: 'connecting', ROOM: 'room', ERROR: 'error' };
 
+function getInviteRoomId() {
+  if (typeof window === 'undefined') return '';
+  const roomId = new URLSearchParams(window.location.search).get('room') || '';
+  return roomId.trim().toUpperCase();
+}
+
+function setInviteRoomInUrl(roomId) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', roomId);
+  window.history.replaceState(null, '', url);
+}
+
 export default function App() {
   const [phase, setPhase] = useState(PHASE.LOBBY);
   const [localInfo, setLocalInfo] = useState(null);
   const [error, setError] = useState('');
+  const [inviteRoomId] = useState(getInviteRoomId);
 
   const { socket, connected } = useSocket();
   const mediaState = useMediaDevices();
@@ -48,6 +62,7 @@ export default function App() {
       // Set localInfo → triggers Room to mount → Room registers all socket
       // listeners in its useEffect → THEN emits join-room.
       // This prevents the race where join-room fires before listeners are attached.
+      setInviteRoomInUrl(roomId);
       setLocalInfo({ name, roomId, isMuted, isVideoOff });
       setPhase(PHASE.ROOM);
     },
@@ -71,7 +86,7 @@ export default function App() {
         </div>
       )}
 
-      {phase === PHASE.LOBBY && <Lobby onJoin={handleJoin} />}
+      {phase === PHASE.LOBBY && <Lobby onJoin={handleJoin} inviteRoomId={inviteRoomId} />}
 
       {phase === PHASE.CONNECTING && (
         <div className="loading-screen">

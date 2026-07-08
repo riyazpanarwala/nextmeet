@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 
-export function Lobby({ onJoin }) {
+export function Lobby({ onJoin, inviteRoomId = '' }) {
+  const normalizedInviteRoomId = inviteRoomId.trim().toUpperCase();
   const [name, setName] = useState('');
   const [roomId, setRoomId] = useState('');
-  const [joinRoomId, setJoinRoomId] = useState('');
-  const [tab, setTab] = useState('new'); // 'new' | 'join'
+  const [joinRoomId, setJoinRoomId] = useState(normalizedInviteRoomId);
+  const [tab, setTab] = useState(normalizedInviteRoomId ? 'join' : 'new'); // 'new' | 'join'
   const [preview, setPreview] = useState(null);
   const [permError, setPermError] = useState('');
   const [isMuted, setIsMuted] = useState(false);
@@ -22,6 +23,12 @@ export function Lobby({ onJoin }) {
   useEffect(() => {
     if (videoRef.current && preview) videoRef.current.srcObject = preview;
   }, [preview, isVideoOff]);
+
+  useEffect(() => {
+    if (!normalizedInviteRoomId) return;
+    setJoinRoomId(normalizedInviteRoomId);
+    setTab('join');
+  }, [normalizedInviteRoomId]);
 
   const startPreview = async () => {
     try {
@@ -74,7 +81,7 @@ export function Lobby({ onJoin }) {
   const handleJoin = () => {
     const trimmedName = name.trim();
     if (!trimmedName) return;
-    const finalRoomId = (tab === 'new' ? roomId : joinRoomId).trim().toUpperCase();
+    const finalRoomId = (normalizedInviteRoomId || (tab === 'new' ? roomId : joinRoomId)).trim().toUpperCase();
     if (!finalRoomId) return;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     onJoin({ name: trimmedName, roomId: finalRoomId, isMuted, isVideoOff });
@@ -133,23 +140,24 @@ export function Lobby({ onJoin }) {
 
           <h1>Ready to join?</h1>
 
-          {/* Tab switcher */}
-          <div className="lobby-tabs" role="tablist">
-            <button
-              role="tab"
-              className={`lobby-tab ${tab === 'new' ? 'active' : ''}`}
-              onClick={() => setTab('new')}
-            >
-              New Room
-            </button>
-            <button
-              role="tab"
-              className={`lobby-tab ${tab === 'join' ? 'active' : ''}`}
-              onClick={() => setTab('join')}
-            >
-              Join Existing
-            </button>
-          </div>
+          {!normalizedInviteRoomId && (
+            <div className="lobby-tabs" role="tablist">
+              <button
+                role="tab"
+                className={`lobby-tab ${tab === 'new' ? 'active' : ''}`}
+                onClick={() => setTab('new')}
+              >
+                New Room
+              </button>
+              <button
+                role="tab"
+                className={`lobby-tab ${tab === 'join' ? 'active' : ''}`}
+                onClick={() => setTab('join')}
+              >
+                Join Existing
+              </button>
+            </div>
+          )}
 
           {/* Name */}
           <label htmlFor="user-name">Your Name</label>
@@ -164,7 +172,11 @@ export function Lobby({ onJoin }) {
           />
 
           {/* Room ID fields */}
-          {tab === 'new' ? (
+          {normalizedInviteRoomId ? (
+            <p className="room-share-hint invite-room-hint">
+              Joining room from shared link
+            </p>
+          ) : tab === 'new' ? (
             <>
               <label>Your Room ID</label>
               <div className="room-id-row">
@@ -203,7 +215,7 @@ export function Lobby({ onJoin }) {
             onClick={handleJoin}
             disabled={!name.trim() || (tab === 'join' && !joinRoomId.trim())}
           >
-            {tab === 'new' ? 'Start Meeting' : 'Join Meeting'}
+            {tab === 'new' && !normalizedInviteRoomId ? 'Start Meeting' : 'Join Meeting'}
           </button>
 
           <p className="lobby-footer">
