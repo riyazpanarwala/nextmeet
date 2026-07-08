@@ -64,7 +64,7 @@ export default function App() {
   const showReconnecting = phase === PHASE.ROOM && !connected;
 
   return (
-    <div className="app">
+    <div className={`app app-${phase}`}>
       {showReconnecting && (
         <div className="reconnect-banner">
           ⚠ Connection lost — reconnecting…

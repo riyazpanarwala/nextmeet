@@ -53,7 +53,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 select option { background: var(--surface2); }
 
 /* ── App shell ───────────────────────────── */
-.app { height: 100%; display: flex; flex-direction: column; position: relative; }
+.app {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
 
 /* ── Reconnect banner ────────────────────── */
 .reconnect-banner {
@@ -1002,13 +1009,19 @@ select option { background: var(--surface2); }
   }
 
   /* ── Lobby ──────────────────────────── */
-  .lobby {
-    align-items: flex-start;
-    padding-top: 0;
-    height: 100%;
-    min-height: 100dvh;
+  .app-lobby {
+    height: 100dvh;
+    overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+  }
+  .lobby {
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding-top: 0;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
   }
   .lobby-card {
     flex-direction: column;

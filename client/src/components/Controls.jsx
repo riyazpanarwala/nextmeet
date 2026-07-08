@@ -98,7 +98,7 @@ export function Controls({
     !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 
   const screenShareDisabled =
-    !isScreenSharing && (canShareScreen === false || !screenShareSupported);
+    !isScreenSharing && canShareScreen === false;
 
   const screenShareTitle = isScreenSharing
     ? 'Stop Sharing'
@@ -121,6 +121,7 @@ export function Controls({
     : 'Stop Video';
 
   return (
+    <>
     <div className="controls-bar">
       <div className="controls-left">
         <span className="room-time">
@@ -210,52 +211,53 @@ export function Controls({
           </button>
         )}
       </div>
-
-      {/* Settings panel */}
-      {showSettings && (
-        <div className="settings-panel">
-          <h3>Device Settings</h3>
-
-          <label>Microphone</label>
-          <select
-            value={selectedDevices.audioIn}
-            onChange={(e) => handleDeviceSwitch(onSwitchAudio, e.target.value, 'microphone')}
-          >
-            {devices.audioIn.length === 0 && <option>No microphone found</option>}
-            {devices.audioIn.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
-              </option>
-            ))}
-          </select>
-
-          <label>Camera</label>
-          <select
-            value={selectedDevices.videoIn}
-            onChange={(e) => handleDeviceSwitch(onSwitchVideo, e.target.value, 'camera')}
-          >
-            {devices.videoIn.length === 0 && <option>No camera found</option>}
-            {devices.videoIn.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
-              </option>
-            ))}
-          </select>
-
-          <label>Speaker</label>
-          <select
-            value={selectedDevices.audioOut}
-            onChange={(e) => onSwitchSpeaker(e.target.value)}
-          >
-            {devices.audioOut.length === 0 && <option>Default speaker</option>}
-            {devices.audioOut.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
     </div>
+
+    {/* Settings panel lives outside the scrollable controls bar so mobile browsers do not clip it. */}
+    {showSettings && (
+      <div className="settings-panel">
+        <h3>Device Settings</h3>
+
+        <label>Microphone</label>
+        <select
+          value={selectedDevices.audioIn}
+          onChange={(e) => handleDeviceSwitch(onSwitchAudio, e.target.value, 'microphone')}
+        >
+          {devices.audioIn.length === 0 && <option>No microphone found</option>}
+          {devices.audioIn.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+            </option>
+          ))}
+        </select>
+
+        <label>Camera</label>
+        <select
+          value={selectedDevices.videoIn}
+          onChange={(e) => handleDeviceSwitch(onSwitchVideo, e.target.value, 'camera')}
+        >
+          {devices.videoIn.length === 0 && <option>No camera found</option>}
+          {devices.videoIn.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
+            </option>
+          ))}
+        </select>
+
+        <label>Speaker</label>
+        <select
+          value={selectedDevices.audioOut}
+          onChange={(e) => onSwitchSpeaker(e.target.value)}
+        >
+          {devices.audioOut.length === 0 && <option>Default speaker</option>}
+          {devices.audioOut.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
+            </option>
+          ))}
+        </select>
+      </div>
+    )}
+    </>
   );
 }
