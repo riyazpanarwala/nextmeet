@@ -20,15 +20,19 @@ export default function App() {
       setPhase(PHASE.CONNECTING);
 
       // Get media FIRST — localStreamRef must be populated before Room mounts
-      // so tracks are available when createPeerConnection() is called
+      // so tracks are available when createPeerConnection() is called.
+      //
+      // startLocalStream() internally falls back to audio-only or video-only
+      // if the combined request fails (e.g. no camera on a desktop PC, or no
+      // microphone). This only throws when NEITHER device is usable.
       try {
         await mediaState.startLocalStream(undefined, undefined, { isMuted, isVideoOff });
       } catch (err) {
         const msg =
           err.name === 'NotAllowedError'
-            ? 'Camera/microphone permission denied. Please allow access and try again.'
+            ? 'Camera and microphone permission denied. Please allow access and try again.'
             : err.name === 'NotFoundError'
-            ? 'No camera or microphone found.'
+            ? 'No camera or microphone found on this device.'
             : `Media error: ${err.message}`;
         setError(msg);
         setPhase(PHASE.ERROR);

@@ -67,6 +67,7 @@ const SettingsIcon = () => (
 
 export function Controls({
   isMuted, isVideoOff, isScreenSharing, isRecording,
+  hasAudioTrack = true, hasVideoTrack = true, // false when no mic/camera was ever captured
   canShareScreen, // false when the max concurrent screen-share limit is reached
   onToggleMute, onToggleVideo, onToggleScreen,
   onLeave, onToggleChat, onToggleParticipants, onToggleRecording,
@@ -98,6 +99,18 @@ export function Controls({
     ? 'Screen share limit reached (2 people already sharing)'
     : 'Share Screen';
 
+  const micTitle = !hasAudioTrack
+    ? 'No microphone available'
+    : isMuted
+    ? 'Unmute'
+    : 'Mute';
+
+  const camTitle = !hasVideoTrack
+    ? 'No camera available'
+    : isVideoOff
+    ? 'Start Video'
+    : 'Stop Video';
+
   return (
     <div className="controls-bar">
       <div className="controls-left">
@@ -107,16 +120,26 @@ export function Controls({
       </div>
 
       <div className="controls-center">
-        {/* Mute */}
-        <button className={`ctrl-btn ${isMuted ? 'active-danger' : ''}`} onClick={onToggleMute} title={isMuted ? 'Unmute' : 'Mute'}>
-          <MicIcon muted={isMuted} />
-          <span className="mobile-label">{isMuted ? 'Unmute' : 'Mute'}</span>
+        {/* Mic — disabled and relabeled when no microphone track was ever captured */}
+        <button
+          className={`ctrl-btn ${(isMuted || !hasAudioTrack) ? 'active-danger' : ''}`}
+          onClick={onToggleMute}
+          disabled={!hasAudioTrack}
+          title={micTitle}
+        >
+          <MicIcon muted={isMuted || !hasAudioTrack} />
+          <span className="mobile-label">{!hasAudioTrack ? 'No mic' : isMuted ? 'Unmute' : 'Mute'}</span>
         </button>
 
-        {/* Video */}
-        <button className={`ctrl-btn ${isVideoOff ? 'active-danger' : ''}`} onClick={onToggleVideo} title={isVideoOff ? 'Start Video' : 'Stop Video'}>
-          <CamIcon off={isVideoOff} />
-          <span className="mobile-label">{isVideoOff ? 'Start' : 'Stop'}</span>
+        {/* Video — disabled and relabeled when no camera track was ever captured */}
+        <button
+          className={`ctrl-btn ${(isVideoOff || !hasVideoTrack) ? 'active-danger' : ''}`}
+          onClick={onToggleVideo}
+          disabled={!hasVideoTrack}
+          title={camTitle}
+        >
+          <CamIcon off={isVideoOff || !hasVideoTrack} />
+          <span className="mobile-label">{!hasVideoTrack ? 'No cam' : isVideoOff ? 'Start' : 'Stop'}</span>
         </button>
 
         {/* Screen Share — disabled when unsupported or the concurrent-share cap is reached */}

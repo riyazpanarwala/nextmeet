@@ -13,6 +13,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const {
     localStream, localStreamRef, screenStreamRef,
     isMuted, isVideoOff, isScreenSharing,
+    hasAudioTrack, hasVideoTrack,
     devices, selectedDevices,
     toggleMute, toggleVideo,
     startScreenShare, stopScreenShare,
@@ -755,6 +756,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       <Controls
         isMuted={isMuted}
         isVideoOff={isVideoOff}
+        hasAudioTrack={hasAudioTrack}
+        hasVideoTrack={hasVideoTrack}
         isScreenSharing={isScreenSharing}
         isRecording={isRecording}
         canShareScreen={canShareScreen}

@@ -12,6 +12,12 @@ export function useMediaDevices() {
     audioOut: '',
     videoIn: '',
   });
+  // Whether the local stream actually has a working track of each kind.
+  // These are the source of truth for disabling controls; isMuted/isVideoOff
+  // remain purely "user wants this on/off" state and can be true even when
+  // there's no track at all (e.g. no camera present).
+  const [hasAudioTrack, setHasAudioTrack] = useState(false);
+  const [hasVideoTrack, setHasVideoTrack] = useState(false);
   const screenStreamRef = useRef(null);
 
   const loadDevices = useCallback(async () => {
@@ -29,40 +35,87 @@ export function useMediaDevices() {
 
   const startLocalStream = useCallback(
     async (audioDeviceId, videoDeviceId, initialState = { isMuted, isVideoOff }) => {
+      const videoConstraint = videoDeviceId
+        ? { deviceId: { exact: videoDeviceId }, width: 1280, height: 720 }
+        : { width: 1280, height: 720 };
+      const audioConstraint = audioDeviceId
+        ? { deviceId: { exact: audioDeviceId } }
+        : true;
+
+      let stream;
+      let gotAudio = true;
+      let gotVideo = true;
+
+      // 1) Try both audio + video together (the common case)
       try {
-        const constraints = {
-          audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
-          video: videoDeviceId
-            ? { deviceId: { exact: videoDeviceId }, width: 1280, height: 720 }
-            : { width: 1280, height: 720 },
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        const nextMuted = Boolean(initialState.isMuted);
-        const nextVideoOff = Boolean(initialState.isVideoOff);
-        stream.getAudioTracks().forEach((track) => { track.enabled = !nextMuted; });
-        stream.getVideoTracks().forEach((track) => { track.enabled = !nextVideoOff; });
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        setIsMuted(nextMuted);
-        setIsVideoOff(nextVideoOff);
-        await loadDevices();
-        return stream;
-      } catch (err) {
-        console.error('getUserMedia error:', err);
-        throw err;
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraint,
+          video: videoConstraint,
+        });
+      } catch (bothErr) {
+        console.warn('[Media] audio+video failed:', bothErr.name, '— trying fallbacks');
+
+        // 2) Try audio only (covers: no camera, camera denied, camera in use)
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: audioConstraint,
+            video: false,
+          });
+          gotVideo = false;
+          console.warn('[Media] Joining audio-only — no usable camera');
+        } catch (audioOnlyErr) {
+          // 3) Try video only (covers: no mic, mic denied, mic in use)
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: videoConstraint,
+            });
+            gotAudio = false;
+            console.warn('[Media] Joining video-only — no usable microphone');
+          } catch (videoOnlyErr) {
+            // 4) Neither works at all — nothing to join with.
+            // Re-throw the original combined error; it's usually the most
+            // informative (e.g. NotFoundError when the machine truly has
+            // neither device attached).
+            throw bothErr;
+          }
+        }
       }
+
+      const nextMuted = Boolean(initialState.isMuted) || !gotAudio;
+      const nextVideoOff = Boolean(initialState.isVideoOff) || !gotVideo;
+
+      stream.getAudioTracks().forEach((track) => { track.enabled = !nextMuted; });
+      stream.getVideoTracks().forEach((track) => { track.enabled = !nextVideoOff; });
+
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      setIsMuted(nextMuted);
+      setIsVideoOff(nextVideoOff);
+      setHasAudioTrack(gotAudio);
+      setHasVideoTrack(gotVideo);
+      await loadDevices();
+      return stream;
     },
     [loadDevices, isMuted, isVideoOff]
   );
 
   // NOTE: Room.jsx manages track.enabled directly via refs for immediacy.
   // These setters exist only to trigger React re-renders for the UI state.
+  // They're also guarded so toggling is a no-op when there's no real track
+  // to toggle (e.g. clicking "unmute" when no microphone was ever captured).
   const toggleMute = useCallback(() => {
-    setIsMuted((prev) => !prev);
+    setHasAudioTrack((has) => {
+      if (has) setIsMuted((prev) => !prev);
+      return has;
+    });
   }, []);
 
   const toggleVideo = useCallback(() => {
-    setIsVideoOff((prev) => !prev);
+    setHasVideoTrack((has) => {
+      if (has) setIsVideoOff((prev) => !prev);
+      return has;
+    });
   }, []);
 
   const startScreenShare = useCallback(async () => {
@@ -141,6 +194,8 @@ export function useMediaDevices() {
     isMuted,
     isVideoOff,
     isScreenSharing,
+    hasAudioTrack,
+    hasVideoTrack,
     devices,
     selectedDevices,
     startLocalStream,
