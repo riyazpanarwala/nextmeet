@@ -22,6 +22,7 @@ export function useMediaDevices() {
 
   const loadDevices = useCallback(async () => {
     try {
+      if (!navigator.mediaDevices?.enumerateDevices) return;
       const all = await navigator.mediaDevices.enumerateDevices();
       setDevices({
         audioIn: all.filter((d) => d.kind === 'audioinput'),
@@ -35,6 +36,10 @@ export function useMediaDevices() {
 
   const startLocalStream = useCallback(
     async (audioDeviceId, videoDeviceId, initialState = { isMuted, isVideoOff }) => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera and microphone require HTTPS or localhost in this browser.');
+      }
+
       const videoConstraint = videoDeviceId
         ? {
             deviceId: { exact: videoDeviceId },
@@ -129,6 +134,10 @@ export function useMediaDevices() {
 
   const startScreenShare = useCallback(async () => {
     try {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        throw new Error('Screen sharing is not supported in this browser.');
+      }
+
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           cursor: 'always',
@@ -195,6 +204,7 @@ export function useMediaDevices() {
   }, []);
 
   useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener) return undefined;
     navigator.mediaDevices.addEventListener('devicechange', loadDevices);
     return () => navigator.mediaDevices.removeEventListener('devicechange', loadDevices);
   }, [loadDevices]);

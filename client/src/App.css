@@ -1134,7 +1134,12 @@ select option { background: var(--surface2); }
   .messages-list { padding: 12px; gap: 10px; }
   .msg-bubble { font-size: 13px; padding: 8px 11px; }
   .chat-input-row { padding: 10px 12px; gap: 6px; }
-  .chat-input-row textarea { font-size: 14px; }   /* prevents iOS zoom on focus */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+  .chat-input-row textarea { font-size: 16px; }
 
   /* ── Settings: bottom sheet ─────────── */
   .settings-panel {

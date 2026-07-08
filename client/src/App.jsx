@@ -29,11 +29,11 @@ export default function App() {
         await mediaState.startLocalStream(undefined, undefined, { isMuted, isVideoOff });
       } catch (err) {
         const msg =
-          err.name === 'NotAllowedError'
+          err?.name === 'NotAllowedError'
             ? 'Camera and microphone permission denied. Please allow access and try again.'
-            : err.name === 'NotFoundError'
+            : err?.name === 'NotFoundError'
             ? 'No camera or microphone found on this device.'
-            : `Media error: ${err.message}`;
+            : `Media error: ${err?.message || 'Could not access camera or microphone.'}`;
         setError(msg);
         setPhase(PHASE.ERROR);
         return;

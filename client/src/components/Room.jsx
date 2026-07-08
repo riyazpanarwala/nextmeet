@@ -526,6 +526,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     [socket, localInfo]
   );
 
+  const handleCopyRoomId = useCallback(async () => {
+    try {
+      await navigator.clipboard?.writeText(localInfo.roomId);
+    } catch (err) {
+      console.warn('[Room] Could not copy room ID:', err);
+    }
+  }, [localInfo]);
+
   const handleToggleChat = () => {
     setShowChat((s) => !s);
     if (showRecording) setShowRecording(false);
@@ -671,7 +679,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           <span className="room-id-tag">Room: {localInfo.roomId}</span>
           <button
             className="copy-room-btn"
-            onClick={() => navigator.clipboard.writeText(localInfo.roomId)}
+            onClick={handleCopyRoomId}
           >
             Copy
           </button>

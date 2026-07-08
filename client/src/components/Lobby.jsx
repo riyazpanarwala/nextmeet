@@ -25,12 +25,26 @@ export function Lobby({ onJoin }) {
 
   const startPreview = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera preview requires HTTPS or localhost in this browser.');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640, max: 1280 },
+          height: { ideal: 360, max: 720 },
+          frameRate: { ideal: 15, max: 24 },
+        },
+        audio: false,
+      });
       streamRef.current = stream;
       setPreview(stream);
       setPermError('');
       if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch {
+    } catch (err) {
+      if (err?.message) {
+        setPermError(err.message);
+        return;
+      }
       setPermError('Camera access denied — you can still join audio-only.');
     }
   };
@@ -47,10 +61,14 @@ export function Lobby({ onJoin }) {
     streamRef.current?.getVideoTracks().forEach((track) => { track.enabled = false; });
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(tab === 'new' ? roomId : joinRoomId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard?.writeText(tab === 'new' ? roomId : joinRoomId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const handleJoin = () => {
@@ -143,7 +161,6 @@ export function Lobby({ onJoin }) {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={handleKey}
             autoComplete="name"
-            autoFocus
           />
 
           {/* Room ID fields */}
