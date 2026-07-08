@@ -22,7 +22,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
   const [remoteParticipants, setRemoteParticipants] = useState({});
   const [remoteScreenShares, setRemoteScreenShares] = useState({}); // socketId -> MediaStream
-  const [activeSharerIds, setActiveSharerIds] = useState(new Set()); // socketIds currently sharing (remote + tracked for local too)
+  const [activeSharerIds, setActiveSharerIds] = useState(new Set()); // socketIds currently sharing (remote + local)
   const [messages, setMessages] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showChat, setShowChat] = useState(false);
@@ -31,7 +31,6 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const [isHost, setIsHost] = useState(false);
   const [localSocketId, setLocalSocketId] = useState('');
   const [roomFullError, setRoomFullError] = useState(false);
-  const screenSenderRef = useRef(null);
 
   // Stable refs so socket handlers don't re-register on every render
   const isMutedRef = useRef(isMuted);
@@ -49,7 +48,6 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const remoteParticipantsRef = useRef(remoteParticipants);
   useEffect(() => { remoteParticipantsRef.current = remoteParticipants; }, [remoteParticipants]);
   const isScreenSharingRef = useRef(false);
-  const screenTrackRef = useRef(null);
 
   // ── Recording hook ──────────────────────────────────────────────
   const {
@@ -178,9 +176,9 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       }));
 
       // If I'm currently sharing my screen, extend that share to the newcomer
-      if (isScreenSharingRef.current && screenTrackRef.current) {
+      if (isScreenSharingRef.current && screenStreamRef.current) {
         console.log('[Room] Extending active screen share to newcomer:', socketId);
-        makeScreenOfferRef.current(socketId, screenTrackRef.current);
+        makeScreenOfferRef.current(socketId, screenStreamRef.current);
       }
     };
 
@@ -387,8 +385,15 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       closeScreenPeerRef.current(id);
     });
     isScreenSharingRef.current = false;
-    screenTrackRef.current = null;
-    screenSenderRef.current = null;
+
+    // The server never echoes 'peer-screen-share' back to the sender
+    // (it uses socket.to(), which excludes the emitter), so we have to
+    // remove our own id from activeSharerIds ourselves.
+    setActiveSharerIds((prev) => {
+      const next = new Set(prev);
+      next.delete(localSocketIdRef.current);
+      return next;
+    });
   }, [stopScreenShare, socket, localInfo]);
 
   const handleToggleScreen = useCallback(async () => {
@@ -397,6 +402,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     // created before a React re-render picked up the new value.
     if (isScreenSharingRef.current) {
       stopScreenSharing();
+      return;
+    }
+
+    // Feature-detect getDisplayMedia — it's unavailable on iOS Safari
+    // (and Chrome-on-iOS, since it's WebKit under the hood) and some
+    // embedded webviews. Without this check the button fails silently.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      alert('Screen sharing isn\'t supported in this browser. Try a desktop browser instead.');
       return;
     }
 
@@ -419,12 +432,15 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         }
 
         isScreenSharingRef.current = true;
-        screenTrackRef.current = screenTrack;
-        screenSenderRef.current = screenTrack;
 
-        // Send this screen track to every current remote participant
+        // The sharer needs to know about their own active share too —
+        // the server only broadcasts to *other* sockets in the room.
+        setActiveSharerIds((prev) => new Set(prev).add(localSocketIdRef.current));
+
+        // Send the FULL screen stream (video + audio, when granted) to
+        // every current remote participant.
         Object.keys(remoteParticipantsRef.current).forEach((id) => {
-          makeScreenOfferRef.current(id, screenTrack);
+          makeScreenOfferRef.current(id, screenStream);
         });
       });
 
@@ -434,6 +450,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       screenTrack.onended = () => stopScreenSharing();
     } catch (err) {
       console.error('Screen share failed:', err);
+      // NotAllowedError just means the user cancelled the picker — no
+      // need to alert them about their own choice.
+      if (err?.name !== 'NotAllowedError') {
+        alert('Could not start screen sharing. Please check your browser permissions and try again.');
+      }
     }
   }, [startScreenShare, stopScreenShare, stopScreenSharing, socket, localInfo, activeSharerIds]);
 

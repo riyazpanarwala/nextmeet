@@ -39,6 +39,14 @@ export function usePeerConnections({
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       iceCandidateQueues.current[remoteSocketId] = [];
 
+      // Gates onnegotiationneeded so it only fires *after* the initial
+      // offer/answer handshake for this peer has completed. Without this,
+      // the automatic negotiationneeded event fired by addTrack() below
+      // would race with the explicit makeOffer()/handleOffer() flow below
+      // and send a duplicate/premature offer before the first one settles.
+      pc._negotiationReady = false;
+      pc._makingOffer = false;
+
       // ── Add ALL local tracks so remote side receives both audio AND video ──
       const stream = localStreamRef.current;
       if (stream) {
@@ -58,6 +66,30 @@ export function usePeerConnections({
 
       pc.onicegatheringstatechange = () => {
         console.log('[PC] ICE gathering state:', pc.iceGatheringState, 'for', remoteSocketId);
+      };
+
+      // ── Renegotiation ──
+      // This is what actually makes pc.restartIce() (below) do something.
+      // restartIce() only flags the connection as needing a new ICE
+      // exchange — it's onnegotiationneeded that has to fire a fresh
+      // createOffer()/setLocalDescription()/signal cycle for the restart
+      // to take effect. WebRTC allows offer/answer roles to switch on
+      // later negotiation rounds of the same connection, so it's fine for
+      // either side (original offerer or original answerer) to send this.
+      pc.onnegotiationneeded = async () => {
+        if (!pc._negotiationReady) return;
+        if (pc._makingOffer || pc.signalingState !== 'stable') return;
+        try {
+          pc._makingOffer = true;
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          console.log('[PC] Sending renegotiation offer to:', remoteSocketId);
+          socket.emit('offer', { to: remoteSocketId, offer: pc.localDescription, kind: 'camera' });
+        } catch (err) {
+          console.error('[PC] onnegotiationneeded error:', err);
+        } finally {
+          pc._makingOffer = false;
+        }
       };
 
       // ── Connection state ──
@@ -120,15 +152,19 @@ export function usePeerConnections({
     async (remoteSocketId) => {
       const pc = createPeerConnection(remoteSocketId);
       try {
+        pc._makingOffer = true;
         const offer = await pc.createOffer({
           offerToReceiveAudio: true,
           offerToReceiveVideo: true,
         });
         await pc.setLocalDescription(offer);
+        pc._negotiationReady = true;
         console.log('[PC] Sending offer to:', remoteSocketId);
         socket.emit('offer', { to: remoteSocketId, offer: pc.localDescription, kind: 'camera' });
       } catch (err) {
         console.error('[PC] makeOffer error:', err);
+      } finally {
+        pc._makingOffer = false;
       }
     },
     [createPeerConnection, socket]
@@ -145,6 +181,7 @@ export function usePeerConnections({
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        pc._negotiationReady = true;
         console.log('[PC] Sending answer to:', remoteSocketId);
         socket.emit('answer', { to: remoteSocketId, answer: pc.localDescription, kind: 'camera' });
       } catch (err) {
@@ -162,6 +199,8 @@ export function usePeerConnections({
     }
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      pc._negotiationReady = true;
+      pc._makingOffer = false;
       // Drain candidates that arrived before the answer
       await drainIceCandidateQueue(remoteSocketId);
     } catch (err) {
@@ -226,7 +265,7 @@ export function usePeerConnections({
   // ══════════════════════════════════════════════════════════════
 
   const createScreenPeerConnection = useCallback(
-    (remoteSocketId, isSender, screenTrack) => {
+    (remoteSocketId, isSender, screenStream) => {
       if (screenPeerConnections.current[remoteSocketId]) {
         return screenPeerConnections.current[remoteSocketId];
       }
@@ -234,14 +273,38 @@ export function usePeerConnections({
       console.log('[ScreenPC] Creating screen peer connection for:', remoteSocketId, isSender ? '(sender)' : '(receiver)');
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       screenIceCandidateQueues.current[remoteSocketId] = [];
+      pc._negotiationReady = false;
+      pc._makingOffer = false;
 
-      if (isSender && screenTrack) {
-        pc.addTrack(screenTrack);
+      // Add every track from the screen stream — video AND audio (tab/
+      // system audio, when the browser/user grants it) — not just video.
+      // Previously only the video track was ever passed in here, so
+      // remote viewers never received screen-share audio.
+      if (isSender && screenStream) {
+        screenStream.getTracks().forEach((track) => pc.addTrack(track, screenStream));
       }
 
       pc.onicecandidate = ({ candidate }) => {
         if (candidate) {
           socket.emit('ice-candidate', { to: remoteSocketId, candidate, kind: 'screen' });
+        }
+      };
+
+      // Same renegotiation gate/logic as the camera PC — makes ICE
+      // restarts on screen-share connections actually take effect.
+      pc.onnegotiationneeded = async () => {
+        if (!pc._negotiationReady) return;
+        if (pc._makingOffer || pc.signalingState !== 'stable') return;
+        try {
+          pc._makingOffer = true;
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          console.log('[ScreenPC] Sending renegotiation offer to:', remoteSocketId);
+          socket.emit('offer', { to: remoteSocketId, offer: pc.localDescription, kind: 'screen' });
+        } catch (err) {
+          console.error('[ScreenPC] onnegotiationneeded error:', err);
+        } finally {
+          pc._makingOffer = false;
         }
       };
 
@@ -258,7 +321,7 @@ export function usePeerConnections({
 
       const remoteStream = new MediaStream();
       pc.ontrack = ({ track, streams }) => {
-        console.log('[ScreenPC] Got remote screen track from', remoteSocketId);
+        console.log('[ScreenPC] Got remote screen track from', remoteSocketId, track.kind);
         if (streams && streams[0]) {
           onRemoteScreenStream(remoteSocketId, streams[0]);
         } else {
@@ -289,17 +352,22 @@ export function usePeerConnections({
     screenIceCandidateQueues.current[remoteSocketId] = [];
   }, []);
 
-  // Called by the SHARER for each remote participant (existing + late joiners)
+  // Called by the SHARER for each remote participant (existing + late joiners).
+  // `screenStream` is the FULL MediaStream from getDisplayMedia (video + audio).
   const makeScreenOffer = useCallback(
-    async (remoteSocketId, screenTrack) => {
-      const pc = createScreenPeerConnection(remoteSocketId, true, screenTrack);
+    async (remoteSocketId, screenStream) => {
+      const pc = createScreenPeerConnection(remoteSocketId, true, screenStream);
       try {
+        pc._makingOffer = true;
         const offer = await pc.createOffer({ offerToReceiveVideo: false, offerToReceiveAudio: false });
         await pc.setLocalDescription(offer);
+        pc._negotiationReady = true;
         console.log('[ScreenPC] Sending screen offer to:', remoteSocketId);
         socket.emit('offer', { to: remoteSocketId, offer: pc.localDescription, kind: 'screen' });
       } catch (err) {
         console.error('[ScreenPC] makeScreenOffer error:', err);
+      } finally {
+        pc._makingOffer = false;
       }
     },
     [createScreenPeerConnection, socket]
@@ -315,6 +383,7 @@ export function usePeerConnections({
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        pc._negotiationReady = true;
         console.log('[ScreenPC] Sending screen answer to:', remoteSocketId);
         socket.emit('answer', { to: remoteSocketId, answer: pc.localDescription, kind: 'screen' });
       } catch (err) {
@@ -332,6 +401,8 @@ export function usePeerConnections({
     }
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      pc._negotiationReady = true;
+      pc._makingOffer = false;
       await drainScreenIceQueue(remoteSocketId);
     } catch (err) {
       console.error('[ScreenPC] handleScreenAnswer error:', err);

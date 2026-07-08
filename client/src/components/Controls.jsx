@@ -67,7 +67,7 @@ const SettingsIcon = () => (
 
 export function Controls({
   isMuted, isVideoOff, isScreenSharing, isRecording,
-  canShareScreen, // NEW — false when the max concurrent screen-share limit is reached
+  canShareScreen, // false when the max concurrent screen-share limit is reached
   onToggleMute, onToggleVideo, onToggleScreen,
   onLeave, onToggleChat, onToggleParticipants, onToggleRecording,
   showChat, showParticipants, showRecording, unreadCount,
@@ -80,7 +80,23 @@ export function Controls({
     setShowSettings((s) => !s);
   };
 
-  const screenShareDisabled = !isScreenSharing && canShareScreen === false;
+  // Feature-detect getDisplayMedia — unavailable on iOS Safari (and any
+  // WebKit-based iOS browser) and some embedded webviews. Without this,
+  // the button looks enabled but silently fails when tapped there.
+  const screenShareSupported =
+    typeof navigator !== 'undefined' &&
+    !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+
+  const screenShareDisabled =
+    !isScreenSharing && (canShareScreen === false || !screenShareSupported);
+
+  const screenShareTitle = isScreenSharing
+    ? 'Stop Sharing'
+    : !screenShareSupported
+    ? 'Screen sharing is not supported in this browser'
+    : canShareScreen === false
+    ? 'Screen share limit reached (2 people already sharing)'
+    : 'Share Screen';
 
   return (
     <div className="controls-bar">
@@ -103,18 +119,12 @@ export function Controls({
           <span className="mobile-label">{isVideoOff ? 'Start' : 'Stop'}</span>
         </button>
 
-        {/* Screen Share — disabled once the concurrent-share cap is reached */}
+        {/* Screen Share — disabled when unsupported or the concurrent-share cap is reached */}
         <button
           className={`ctrl-btn ${isScreenSharing ? 'active-green' : ''}`}
           onClick={onToggleScreen}
           disabled={screenShareDisabled}
-          title={
-            isScreenSharing
-              ? 'Stop Sharing'
-              : screenShareDisabled
-              ? 'Screen share limit reached (2 people already sharing)'
-              : 'Share Screen'
-          }
+          title={screenShareTitle}
         >
           <ScreenIcon active={isScreenSharing} />
           <span className="mobile-label">{isScreenSharing ? 'Stop' : 'Share'}</span>
