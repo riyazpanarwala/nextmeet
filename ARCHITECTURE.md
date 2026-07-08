@@ -1,432 +1,408 @@
-# NexMeet — WebRTC Video Conferencing
-## Complete Architecture & Developer Guide
+# NexMeet Architecture
 
----
+This document describes the current NexMeet implementation: a small-room WebRTC mesh app with Socket.IO signaling, local-only recording, host controls, and direction-aware screen-share peer connections.
 
-## 1. Architecture Overview
+## 1. System Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        BROWSER A                            │
-│  React App  →  Socket.IO  →  WebRTC PeerConnection (mesh)  │
-└──────────────────┬──────────────────────┬───────────────────┘
-                   │ Signaling            │ Media (P2P)
-         ┌─────────▼─────────┐           │
-         │  Node.js Server   │           │ RTP/SRTP streams
-         │  Express +        │           │ (no server hop)
-         │  Socket.IO        │           │
-         └─────────▲─────────┘           │
-                   │ Signaling           │ Media (P2P)
-┌──────────────────┴──────────────────────┴───────────────────┐
-│                        BROWSER B                            │
-│  React App  →  Socket.IO  →  WebRTC PeerConnection (mesh)  │
-└─────────────────────────────────────────────────────────────┘
+```text
+Browser client A                    Signaling server                    Browser client B
+React UI                            Express + Socket.IO                 React UI
+Socket.IO client <--------------->  room/chat/control events  <------>  Socket.IO client
+WebRTC RTCPeerConnection <-------------------------------------------> WebRTC RTCPeerConnection
+P2P SRTP media: camera, mic, screen share
 ```
 
-### What the signaling server does
-- Relays SDP offers/answers and ICE candidates between peers
-- Tracks room membership and participant metadata
-- Enforces host controls (mute-all, remove-user)
-- Relays chat messages and media-state updates
-- Transfers host role on disconnect
+The server does not proxy media. Camera, microphone, and screen-share tracks flow directly between browsers after the signaling handshake completes.
 
-### What the signaling server does NOT do
-- Touch audio/video — all media flows P2P via WebRTC
-- Store messages permanently — in-memory only
-- Authenticate users — add JWT/session middleware for production
+### Server responsibilities
 
----
+- Accept Socket.IO connections.
+- Track in-memory room membership and participant metadata.
+- Enforce the 6-participant room limit.
+- Relay SDP offers, answers, and ICE candidates.
+- Relay chat messages.
+- Broadcast mute/video state.
+- Enforce a maximum of 2 active screen sharers per room.
+- Handle host-only mute-all and remove-user actions.
+- Transfer host role when the current host leaves.
+- Expose lightweight health and room-info endpoints.
 
-## 2. Folder Structure
+### Server non-goals
 
-```
-nexmeet/
-├── package.json              ← root scripts (concurrently)
-├── .env.example
-│
-├── server/
-│   ├── package.json
-│   └── server.js             ← Express + Socket.IO signaling
-│
-└── client/
-    ├── package.json
-    ├── vite.config.js
-    ├── index.html
-    └── src/
-        ├── main.jsx           ← React entry point
-        ├── App.jsx            ← top-level state machine (lobby → room)
-        ├── App.css            ← all styles (dark glassmorphism)
-        │
-        ├── hooks/
-        │   ├── useSocket.js          ← Socket.IO connection lifecycle
-        │   ├── useMediaDevices.js    ← getUserMedia, device switching, screen share
-        │   ├── usePeerConnections.js ← RTCPeerConnection pool, offer/answer
-        │   └── useAudioLevel.js      ← Web Audio API speaking detection
-        │
-        └── components/
-            ├── Lobby.jsx             ← join screen with camera preview
-            ├── Room.jsx              ← main room, orchestrates all events
-            ├── VideoTile.jsx         ← single video with overlay labels
-            ├── Controls.jsx          ← toolbar (mute, video, share, chat…)
-            ├── ChatPanel.jsx         ← real-time chat sidebar
-            └── ParticipantsPanel.jsx ← participant list with host controls
-```
+- No media forwarding, mixing, transcoding, or recording.
+- No persistent chat storage.
+- No authentication or authorization beyond host checks for host actions.
+- No database; room state is process-local memory.
 
----
+## 2. Runtime Components
 
-## 3. WebRTC Connection Flow
+### Root
 
-### 3a. Full offer/answer handshake
+- `package.json` runs client and server scripts from the repository root.
+- `README.md` is the user-facing setup and feature guide.
+- `ARCHITECTURE.md` is this implementation guide.
 
-```
-Alice joins room (alone)
-  → server: join-room { roomId, userName }
-  ← server: room-joined { socketId, isHost: true, participants: [] }
-  (Alice waits)
+### Server
 
-Bob joins same room
-  → server: join-room { roomId, userName }
-  ← server: room-joined { socketId, isHost: false, participants: [Alice] }
-  Bob creates RTCPeerConnection for Alice
-  Bob calls pc.createOffer()
-  Bob sets localDescription
-  → server: offer { to: Alice.socketId, offer: SDP }
+- `server/server.js`
+  - Express app and HTTP server.
+  - Socket.IO server with permissive CORS for development.
+  - `rooms`: `Map<roomId, Map<socketId, participant>>`.
+  - `roomScreenShares`: `Map<roomId, Set<socketId>>`.
+  - `MAX_PARTICIPANTS = 6`.
+  - `MAX_SCREEN_SHARES = 2`.
 
-  Alice receives offer event
-  Alice creates RTCPeerConnection for Bob
-  Alice sets remoteDescription (Bob's offer)
-  Alice calls pc.createAnswer()
-  Alice sets localDescription
-  → server: answer { to: Bob.socketId, answer: SDP }
+### Client
 
-  Bob receives answer
-  Bob sets remoteDescription (Alice's answer)
+- `client/src/App.jsx`
+  - App phase state: lobby, connecting, room, error.
+  - Starts local media before mounting `Room`, so peer connections can immediately attach local tracks.
+  - Shows connection and media errors.
 
-  Both sides exchange ICE candidates via 'ice-candidate' events
-  RTCPeerConnection state → 'connected'
-  pc.ontrack fires → remote stream attached to <video>
-```
+- `client/src/hooks/useSocket.js`
+  - Creates the Socket.IO client.
+  - Defaults to the current hostname with port `3001` when `VITE_SOCKET_URL` is not set.
+  - Uses websocket transport and 10 reconnect attempts.
 
-### 3b. ICE candidate trickle
+- `client/src/hooks/useMediaDevices.js`
+  - Captures local camera/microphone.
+  - Falls back to audio-only or video-only when one device type fails.
+  - Tracks selected mic, camera, and speaker devices.
+  - Handles device switching and device hot-plug.
+  - Captures screen streams with `getDisplayMedia({ video, audio: true })`.
 
-```
-Each side:
-  pc.onicecandidate = ({ candidate }) => {
-    if (candidate) socket.emit('ice-candidate', { to, candidate })
-  }
+- `client/src/hooks/usePeerConnections.js`
+  - Owns WebRTC camera/mic peer connections.
+  - Owns dedicated screen-share peer connections.
+  - Queues ICE candidates until a remote description exists.
+  - Applies sender encoding constraints for camera and screen video.
+  - Restarts ICE when connection state becomes failed.
 
-Remote side:
-  socket.on('ice-candidate', async ({ from, candidate }) => {
-    await pc.addIceCandidate(new RTCIceCandidate(candidate))
-  })
+- `client/src/hooks/useRecording.js`
+  - Creates a 1280x720 canvas compositor.
+  - Draws all provided participant streams into a grid.
+  - Mixes audio streams into a `MediaStreamDestination`.
+  - Records canvas video plus mixed audio through `MediaRecorder`.
+
+- `client/src/components/Room.jsx`
+  - Registers socket listeners.
+  - Emits `join-room` after listeners are attached.
+  - Orchestrates camera signaling, screen-share signaling, chat, host events, recording, and cleanup.
+  - Builds separate camera participant tiles and screen-share tiles.
+  - Supports presentation layout for one or two active screen shares.
+
+## 3. Room Join and Camera Handshake
+
+The client starts local media before joining the room. This prevents peer connections from being created before local tracks are available.
+
+```text
+User submits lobby form
+  App.startLocalStream()
+  App mounts Room
+  Room registers socket listeners
+  Room emits join-room { roomId, userName, isMuted, isVideoOff }
 ```
 
-### 3c. Mesh topology trade-offs
+When a new participant joins an existing room:
 
-| Topology | How it works | Best for | Downside |
-|---|---|---|---|
-| **Mesh (this app)** | Every peer connects to every other peer | ≤6 users | Upload bandwidth grows as O(n²) |
-| **SFU** (Selective Forwarding Unit) | Peers send once to a media server; server fans out | 6–500 users | Requires media server (mediasoup, Janus, LiveKit) |
-| **MCU** | Server mixes all streams into one | Legacy/low-bandwidth clients | High server CPU; latency |
+```text
+Bob -> server: join-room
+server -> Bob: room-joined { socketId, isHost, participants: [Alice], screenSharingSocketIds }
+server -> Alice: user-joined { socketId: Bob, ...mediaState }
 
-For production at >6 participants, integrate [LiveKit](https://livekit.io) or [mediasoup](https://mediasoup.org) as an SFU.
+Bob:
+  create camera RTCPeerConnection for Alice
+  add local audio/video tracks
+  createOffer
+  setLocalDescription
+  emit offer { to: Alice, kind: 'camera' }
 
----
+Alice:
+  receive offer { from: Bob, kind: 'camera' }
+  create camera RTCPeerConnection for Bob
+  add local audio/video tracks
+  setRemoteDescription
+  drain queued camera ICE candidates
+  createAnswer
+  setLocalDescription
+  emit answer { to: Bob, kind: 'camera' }
 
-## 4. Screen Sharing Flow
+Bob:
+  receive answer { from: Alice, kind: 'camera' }
+  setRemoteDescription
+  drain queued camera ICE candidates
 
-```
-User clicks "Share Screen"
-  → navigator.mediaDevices.getDisplayMedia() → screenStream
-  → get screenTrack = screenStream.getVideoTracks()[0]
-  → get camTrack = localStream.getVideoTracks()[0]
-  → for each RTCPeerConnection:
-       sender.replaceTrack(camTrack, screenTrack)   ← no renegotiation needed!
-  → socket.emit('screen-share-started')
-  → remote peers receive 'peer-screen-share' → update UI
-
-User clicks "Stop Sharing" (or browser stop button)
-  → screenTrack.onended fires
-  → replaceTrack(screenTrack, camTrack)
-  → socket.emit('screen-share-stopped')
-```
-
-`replaceTrack()` swaps the track on the existing sender without SDP renegotiation — zero interruption for remote viewers.
-
----
-
-## 5. STUN / TURN Configuration
-
-### STUN (free, handles most cases)
-
-```js
-// Already configured in usePeerConnections.js
-{ urls: 'stun:stun.l.google.com:19302' }
-{ urls: 'stun:stun.cloudflare.com:3478' }
+Both peers:
+  exchange ice-candidate { kind: 'camera' }
+  receive remote tracks
+  merge tracks into one persistent MediaStream per socketId
+  render VideoTile
 ```
 
-STUN lets peers discover their public IP. Works for ~85% of connections.
+### Why the client builds persistent remote streams
 
-### TURN (required for ~15% — corporate/symmetric NAT)
+`ontrack` can fire separately for audio and video. Some browsers do not consistently provide the same `event.streams[0]` identity for both tracks. NexMeet avoids that browser-dependent behavior by creating one `MediaStream` per remote socket ID and upserting tracks into it.
 
-```js
-// Add to ICE_SERVERS array in usePeerConnections.js:
-{
-  urls: 'turn:your-turn.example.com:3478',
-  username: 'nexmeet',
-  credential: 'your-secret',
-}
+## 4. Signaling Event Routing
+
+The same Socket.IO events carry both camera and screen-share negotiation. The `kind` field routes each payload to the correct peer-connection pool.
+
+```text
+offer         { from, offer, kind: 'camera' | 'screen' }
+answer        { from, answer, kind: 'camera' | 'screen' }
+ice-candidate { from, candidate, kind: 'camera' | 'screen' }
 ```
 
-#### Self-hosting coturn (Ubuntu)
+If `kind` is missing, the client treats it as camera signaling for backwards compatibility.
 
-```bash
-sudo apt install coturn
-sudo nano /etc/turnserver.conf
+## 5. Camera Peer Connections
+
+Camera/mic PCs are keyed by remote socket ID:
+
+```text
+peerConnections: socketId -> RTCPeerConnection
+iceCandidateQueues: socketId -> RTCIceCandidate[]
+remoteStreams: socketId -> MediaStream
 ```
 
-```ini
-listening-port=3478
-tls-listening-port=5349
-fingerprint
-lt-cred-mech
-user=nexmeet:your-secret
-realm=your-domain.com
-log-file=/var/log/coturn/turn.log
+Each camera PC:
+
+- Adds all local tracks from `localStreamRef.current`.
+- Applies camera video encoding constraints: 700 kbps max bitrate and 24 fps max framerate.
+- Sends ICE candidates with `kind: 'camera'`.
+- Queues incoming ICE candidates until `remoteDescription` is set.
+- Uses a gated `onnegotiationneeded` flow for ICE restart renegotiation.
+- Calls `pc.restartIce()` when connection state is `failed`.
+
+Device switching uses `RTCRtpSender.replaceTrack()` on camera PCs. That is separate from screen sharing; screen shares do not replace the camera track.
+
+## 6. Screen Sharing Architecture
+
+Screen sharing is intentionally separate from camera/mic connections.
+
+### Current model
+
+A screen share gets a dedicated `RTCPeerConnection` for each viewer. The implementation also separates direction, because two users can share screens with each other at the same time.
+
+```text
+outgoingScreenPCs: remoteSocketId -> PC where local user sends screen
+incomingScreenPCs: remoteSocketId -> PC where local user receives remote screen
+outgoingScreenIceQueues: remoteSocketId -> RTCIceCandidate[]
+incomingScreenIceQueues: remoteSocketId -> RTCIceCandidate[]
+remoteScreenStreams: remoteSocketId -> MediaStream
 ```
 
-```bash
-sudo systemctl enable coturn && sudo systemctl start coturn
+This prevents one direction from overwriting the other direction when two users share simultaneously.
+
+### Start screen share flow
+
+```text
+Local user clicks Share Screen
+  startScreenShare()
+  navigator.mediaDevices.getDisplayMedia({ video, audio: true })
+  socket.emit('screen-share-started', { roomId }, ack)
+
+Server:
+  if socket already sharing: ack { ok: true }
+  else if room has 2 active shares: ack { ok: false, max: 2 }
+  else add socketId to roomScreenShares and broadcast peer-screen-share { sharing: true }
+
+Client on ack ok:
+  mark local socket as active sharer
+  for each current remote participant:
+    create outgoing screen PC
+    add all screen stream tracks, including tab/system audio if granted
+    createOffer
+    setLocalDescription
+    emit offer { to, kind: 'screen' }
 ```
 
-Open ports: **3478/UDP+TCP**, **5349/UDP+TCP**, **49152-65535/UDP** (relay range)
+### Receive screen share flow
 
-#### Managed TURN options
-- **Cloudflare TURN** — generous free tier, global PoPs
-- **Twilio Network Traversal** — pay-per-GB
-- **Metered.ca** — free tier available
+```text
+Viewer receives offer { from: sharer, kind: 'screen' }
+  create incoming screen PC for sharer
+  setRemoteDescription
+  drain incoming screen ICE queue
+  createAnswer
+  setLocalDescription
+  emit answer { to: sharer, kind: 'screen' }
 
----
-
-## 6. Bandwidth Optimization
-
-### Encoding constraints (add to peer connection)
-
-```js
-// After creating offer, apply bandwidth cap:
-const sender = pc.getSenders().find(s => s.track.kind === 'video');
-const params = sender.getParameters();
-params.encodings[0].maxBitrate = 800_000; // 800 kbps per peer
-await sender.setParameters(params);
+Viewer receives screen tracks
+  upsert tracks into remoteScreenStreams[sharer]
+  render as a screen-share VideoTile
 ```
 
-### Simulcast (advanced — requires SFU)
+### Stop screen share flow
 
-With an SFU like LiveKit you can send 3 spatial layers (high/med/low). The SFU forwards the appropriate layer per receiver based on their bandwidth.
+```text
+User clicks Stop Sharing or browser native stop button fires track.onended
+  stop local screen tracks
+  close outgoing screen PCs only
+  emit screen-share-stopped { roomId }
+  remove local active-sharer marker
 
-### Dynamic quality
-
-```js
-// Lower resolution when >4 participants
-const constraints = count > 4
-  ? { width: 640, height: 360 }
-  : { width: 1280, height: 720 };
+Peers receive peer-screen-share { socketId, sharing: false }
+  close incoming screen PC for that socketId only
+  remove remote screen tile
 ```
 
----
+A full participant departure closes both outgoing and incoming screen PCs for that socket ID.
 
-## 7. Edge Cases & Error Handling
+### Late joiners
 
-### Permission denied
+When a user joins a room with active screen shares, `room-joined` includes `screenSharingSocketIds`. Active sharers also listen for `user-joined`; if they are currently sharing, they create a fresh outgoing screen offer for the newcomer.
 
-```js
-try {
-  await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-} catch (err) {
-  if (err.name === 'NotAllowedError') {
-    // Show UI: "Please allow camera/mic access in browser settings"
-  } else if (err.name === 'NotFoundError') {
-    // Show UI: "No camera/microphone found"
-  }
-}
+## 7. Presentation Layout
+
+`Room.jsx` renders camera tiles and screen-share tiles separately.
+
+- No active share: render the normal camera grid.
+- One active share: render it as the main presentation area, with camera tiles in the sidebar.
+- Two active shares with no pinned share: render both in the main presentation area side by side.
+- Two active shares with a pinned share: render the pinned share as main and the other in the sidebar.
+
+The client tracks active sharers in `activeSharerIds`, which includes both local and remote sharers.
+
+## 8. Recording Architecture
+
+Recording is local to the user who starts it.
+
+```text
+RecordingPanel -> Room.startRecording([...screenTiles, ...allParticipants])
+useRecording:
+  create 1280x720 canvas
+  draw active streams in a grid at ~30 fps
+  render avatar fallback when a video frame is unavailable
+  draw participant labels and REC marker
+  build Web Audio mix from all stream audio tracks
+  canvas.captureStream(30)
+  add mixed audio track
+  MediaRecorder.start(1000)
 ```
 
-### Peer ICE failure → auto-restart
+When recording stops:
 
-```js
-pc.onconnectionstatechange = () => {
-  if (pc.connectionState === 'failed') pc.restartIce();
-};
-```
+- The `MediaRecorder` builds a Blob from collected chunks.
+- The panel creates an object URL for preview.
+- Download uses `nexmeet-{roomId}-{timestamp}.webm` from `Room.jsx`.
+- The recording never leaves the browser.
 
-`restartIce()` triggers a new ICE gathering cycle. The offerer must create a new offer — handled by the peer that made the original offer.
+## 9. Socket API
 
-### User leaves / browser closes
+### Client to server
 
-The server handles `disconnecting` (fires before socket rooms are cleared):
-- Removes participant from room map
-- Emits `user-left` to remaining peers
-- Transfers host if the leaving user was host
-- Client side: `usePeerConnections.closePeer()` closes that PC and cleans up the video tile
+| Event | Payload | Notes |
+| --- | --- | --- |
+| `join-room` | `{ roomId, userName, isMuted, isVideoOff }` | Creates room if needed |
+| `offer` | `{ to, offer, kind }` | `kind` is `camera` or `screen` |
+| `answer` | `{ to, answer, kind }` | Routed directly to `to` |
+| `ice-candidate` | `{ to, candidate, kind }` | Routed directly to `to` |
+| `media-state` | `{ roomId, isMuted, isVideoOff }` | Updates server copy and broadcasts |
+| `screen-share-started` | `{ roomId }`, ack | Enforces max 2 active sharers |
+| `screen-share-stopped` | `{ roomId }` | Releases screen-share slot |
+| `chat-message` | `{ roomId, message }` | Server adds id/name/timestamp |
+| `mute-all` | `{ roomId }` | Host-only server check |
+| `remove-user` | `{ roomId, targetSocketId }` | Host-only server check |
 
-### Socket reconnection
+### Server to client
 
-Socket.IO auto-reconnects (10 attempts, 1s delay). On reconnect you need to re-join the room:
+| Event | Payload | Notes |
+| --- | --- | --- |
+| `room-joined` | `{ socketId, isHost, participants, screenSharingSocketIds }` | Sent to joining socket |
+| `user-joined` | `{ socketId, name, isHost, isMuted, isVideoOff }` | Broadcast to existing sockets |
+| `user-left` | `{ socketId }` | Triggers PC cleanup |
+| `room-full` | `{ max }` | Sent to rejected joiner |
+| `offer` | `{ from, offer, kind }` | Camera or screen offer |
+| `answer` | `{ from, answer, kind }` | Camera or screen answer |
+| `ice-candidate` | `{ from, candidate, kind }` | Camera or screen ICE |
+| `peer-media-state` | `{ socketId, isMuted, isVideoOff }` | Updates peer tile state |
+| `peer-screen-share` | `{ socketId, sharing }` | Updates screen-share state |
+| `chat-message` | `{ id, from, name, message, timestamp }` | Appended to chat panel |
+| `host-mute-all` | none | Receiver mutes local audio track |
+| `host-transferred` | `{ socketId }` | Updates host badges and host controls |
+| `removed-from-room` | none | Receiver leaves room after alert |
 
-```js
-socket.on('reconnect', () => {
-  socket.emit('join-room', { roomId, userName });
-});
-```
+## 10. REST API
 
-### Device hot-plug (mic/camera swap)
+| Method | Path | Response |
+| --- | --- | --- |
+| GET | `/health` | `{ status: 'ok' }` |
+| GET | `/room/:roomId/info` | `{ exists, count, screenSharesActive, maxScreenShares }` |
 
-```js
-navigator.mediaDevices.addEventListener('devicechange', async () => {
-  const newDevices = await navigator.mediaDevices.enumerateDevices();
-  // update device list in UI
-});
-```
+## 11. Media and Device Handling
 
-Switching mid-call uses `sender.replaceTrack(newTrack)` — same pattern as screen share.
+### Initial capture
 
-### Mobile Safari quirks
+`useMediaDevices.startLocalStream()` first tries audio plus video. If that fails, it tries audio-only, then video-only. It only throws when neither path works.
 
-- Requires `playsInline` on all `<video>` elements ✅ (already set)
-- `setSinkId()` not supported (speaker selection) — show warning
-- `getDisplayMedia()` not supported on iOS — hide screen share button:
-  ```js
-  const canShare = !!navigator.mediaDevices.getDisplayMedia;
-  ```
+Captured tracks are enabled or disabled based on the lobby's initial mute/camera-off choices.
 
----
+### Switching devices
 
-## 8. Recording Support (Bonus)
+- Microphone switching recreates the local stream through `startLocalStream()`.
+- Camera switching captures a new video-only stream, preserves current audio tracks, stops the old video track, and asks `Room.jsx` to replace the video track on active camera PCs.
+- Speaker switching calls `setSinkId()` on audio/video elements when supported.
 
-### Client-side (single user's view)
+### Browser limitations
 
-```js
-const recorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm' });
-const chunks = [];
-recorder.ondataavailable = (e) => chunks.push(e.data);
-recorder.onstop = () => {
-  const blob = new Blob(chunks, { type: 'video/webm' });
-  const url = URL.createObjectURL(blob);
-  // trigger download
-  const a = document.createElement('a');
-  a.href = url; a.download = 'meeting.webm'; a.click();
-};
-recorder.start();
-```
+- iOS Safari does not support `getDisplayMedia`, so screen sharing is disabled by feature detection.
+- Firefox and Safari do not support `setSinkId`, so speaker selection may be unavailable.
+- Production capture requires HTTPS, except on localhost.
 
-### Server-side composite recording
+## 12. Reliability and Cleanup
 
-Use [Puppeteer](https://pptr.dev) to headlessly join the room and pipe the screen capture through ffmpeg — produces a composite recording of all participants.
+### ICE candidate queuing
 
----
+For both camera and screen-share connections, incoming ICE candidates can arrive before the SDP remote description is set. NexMeet queues candidates by socket ID and connection type, then drains the queue after `setRemoteDescription()`.
 
-## 9. Quick Start
+### ICE restart
 
-```bash
-# 1. Clone / copy the project
-cd nexmeet
+When a camera or screen-share PC reaches `connectionState === 'failed'`, the client calls `restartIce()`. The gated `onnegotiationneeded` handler creates and signals a fresh offer when the connection is stable.
 
-# 2. Install all dependencies
-npm install          # root (concurrently)
-npm install --prefix server
-npm install --prefix client
+### Leave and disconnect
 
-# 3. Configure environment
-cp .env.example client/.env
-# Edit client/.env: VITE_SOCKET_URL=http://localhost:3001
+Local leave:
 
-# 4. Run both server and client
-npm run dev
+- Stop recording if active.
+- Emit `screen-share-stopped` if sharing.
+- Close all camera PCs.
+- Close all outgoing and incoming screen PCs.
+- Stop local camera, microphone, and screen tracks.
+- Return to the lobby.
 
-# Server → http://localhost:3001
-# Client → http://localhost:5173
-```
+Server disconnect:
 
-Open two browser tabs (or two different browsers) to `http://localhost:5173`, use the **same Room ID**, and connect!
+- Remove the socket from each room it joined.
+- Release any screen-share slot held by the socket.
+- Broadcast `peer-screen-share` false if needed.
+- Broadcast `user-left`.
+- Transfer host if the leaving socket was host.
+- Delete empty room and screen-share state.
 
----
+## 13. Scaling and Production Notes
 
-## 10. Production Deployment
+### Mesh limits
 
-### Server (Node.js)
+Mesh is simple and works well for small calls, but each participant uploads to every other participant. At 6 participants, each client sends up to 5 camera streams, plus additional outgoing streams when sharing a screen.
 
-```bash
-# On your VPS / cloud instance
-npm install --prefix server --production
-NODE_ENV=production PORT=3001 node server/server.js
+For larger rooms, migrate media to an SFU such as LiveKit, mediasoup, or Janus. Socket.IO can still remain for app-level events such as chat, host controls, and room metadata.
 
-# Or with PM2 for process management:
-npm install -g pm2
-pm2 start server/server.js --name nexmeet-signal
-pm2 save && pm2 startup
-```
+### Production hardening checklist
 
-### Client (Static hosting)
+- Add authentication and room authorization.
+- Restrict Socket.IO CORS origins.
+- Add TURN servers to `ICE_SERVERS`.
+- Put the server behind HTTPS with WebSocket upgrade support.
+- Use a shared store such as Redis if scaling the signaling server horizontally.
+- Add server-side rate limits for chat and signaling events.
+- Consider structured logging and room metrics.
 
-```bash
-# Build the React app
-npm run build --prefix client
-# Output: client/dist/
+## 14. Important Current Constraints
 
-# Serve with nginx, Vercel, Cloudflare Pages, etc.
-# Point VITE_SOCKET_URL to your production server URL before building
-```
-
-### Nginx reverse proxy (recommended)
-
-```nginx
-server {
-  listen 443 ssl;
-  server_name meet.yourdomain.com;
-
-  ssl_certificate     /etc/letsencrypt/live/meet.yourdomain.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/meet.yourdomain.com/privkey.pem;
-
-  # Serve React build
-  location / {
-    root /var/www/nexmeet/client/dist;
-    try_files $uri $uri/ /index.html;
-  }
-
-  # Proxy signaling server (WebSocket-aware)
-  location /socket.io/ {
-    proxy_pass http://localhost:3001;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-  }
-}
-```
-
-> **Note:** HTTPS is mandatory for WebRTC in production — `getUserMedia` is blocked on plain HTTP (except localhost).
-
----
-
-## 11. Scaling Beyond Mesh
-
-When you need >6-8 concurrent participants per room, migrate to an SFU:
-
-### LiveKit (recommended — open source, self-hostable)
-
-```bash
-docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
-  livekit/livekit-server --dev
-```
-
-Replace `usePeerConnections.js` with the [LiveKit React SDK](https://docs.livekit.io/realtime/quickstarts/react/):
-
-```js
-import { LiveKitRoom, VideoConference } from '@livekit/components-react';
-
-<LiveKitRoom serverUrl="wss://your-livekit-server" token={token}>
-  <VideoConference />
-</LiveKitRoom>
-```
-
-The signaling server can generate LiveKit access tokens via the LiveKit Node SDK — your existing Socket.IO server for chat/host-controls can remain alongside it.
+- Rooms and chat messages are in-memory only.
+- Refreshing the server process drops all rooms.
+- Host identity is not authenticated.
+- Recording is local and records the local user's received media/layout only.
+- Screen sharing depends on browser support for `getDisplayMedia`.
+- The app is designed for up to 6 participants, not large webinars.
