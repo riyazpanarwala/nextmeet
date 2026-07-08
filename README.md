@@ -450,4 +450,4 @@ For larger rooms, migrate media to an SFU such as LiveKit, mediasoup, or Janus. 
 
 ## License
 
-MIT
+No open-source license is currently specified. This project is marked private in `package.json`.
