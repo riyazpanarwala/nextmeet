@@ -384,7 +384,10 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       replaceTrack(oldVideoTrack, newVideoTrack),
     ]);
 
-    oldStream.getTracks().forEach((track) => track.stop());
+    const nextTracks = new Set(newStream.getTracks());
+    oldStream.getTracks().forEach((track) => {
+      if (!nextTracks.has(track)) track.stop();
+    });
   }, [replaceTrack]);
 
   const handleSwitchAudioDevice = useCallback(async (deviceId) => {
@@ -396,9 +399,16 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
   const handleSwitchVideoDevice = useCallback(async (deviceId) => {
     const oldStream = localStreamRef.current;
-    const newStream = await switchVideoDevice(deviceId);
-    await replaceLocalStreamTracks(oldStream, newStream);
-    return newStream;
+    try {
+      const newStream = await switchVideoDevice(deviceId);
+      await replaceLocalStreamTracks(oldStream, newStream);
+      return newStream;
+    } catch (err) {
+      if (err?.restoredStream) {
+        await replaceLocalStreamTracks(oldStream, err.restoredStream);
+      }
+      throw err;
+    }
   }, [localStreamRef, replaceLocalStreamTracks, switchVideoDevice]);
 
   // ── Screen sharing (Approach B: dedicated peer connections per share) ──

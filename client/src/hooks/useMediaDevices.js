@@ -186,10 +186,74 @@ export function useMediaDevices() {
 
   const switchVideoDevice = useCallback(
     async (deviceId) => {
-      const newStream = await startLocalStream(selectedDevices.audioIn, deviceId);
-      return newStream;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera switching requires HTTPS or localhost in this browser.');
+      }
+
+      const currentStream = localStreamRef.current;
+      const currentAudioTracks = currentStream?.getAudioTracks() || [];
+      const previousVideoDeviceId =
+        selectedDevices.videoIn ||
+        currentStream?.getVideoTracks()[0]?.getSettings?.().deviceId ||
+        '';
+
+      const captureVideoDevice = async (targetDeviceId) => {
+        const videoConstraint = targetDeviceId
+          ? {
+              deviceId: { exact: targetDeviceId },
+              width: { ideal: 1280, max: 1280 },
+              height: { ideal: 720, max: 720 },
+              frameRate: { ideal: 24, max: 24 },
+            }
+          : {
+              width: { ideal: 1280, max: 1280 },
+              height: { ideal: 720, max: 720 },
+              frameRate: { ideal: 24, max: 24 },
+            };
+
+        const videoOnlyStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: videoConstraint,
+        });
+        const videoTracks = videoOnlyStream.getVideoTracks();
+        videoTracks.forEach((track) => { track.enabled = !isVideoOff; });
+
+        const nextStream = new MediaStream([...currentAudioTracks, ...videoTracks]);
+        const activeVideoDeviceId = videoTracks[0]?.getSettings?.().deviceId || targetDeviceId || '';
+
+        localStreamRef.current = nextStream;
+        setLocalStream(nextStream);
+        setHasVideoTrack(videoTracks.length > 0);
+        setSelectedDevices((prev) => ({
+          ...prev,
+          videoIn: activeVideoDeviceId || prev.videoIn,
+        }));
+        await loadDevices();
+        return nextStream;
+      };
+
+      currentStream?.getVideoTracks().forEach((track) => track.stop());
+
+      try {
+        return await captureVideoDevice(deviceId);
+      } catch (err) {
+        console.error('[Media] video device switch failed:', err);
+        if (previousVideoDeviceId && previousVideoDeviceId !== deviceId) {
+          try {
+            console.warn('[Media] restoring previous camera');
+            const restoredStream = await captureVideoDevice(previousVideoDeviceId);
+            const switchErr = new Error('Could not switch to that camera. Restored the previous camera.');
+            switchErr.restoredStream = restoredStream;
+            throw switchErr;
+          } catch (restoreErr) {
+            if (restoreErr?.restoredStream) throw restoreErr;
+            console.error('[Media] previous camera restore failed:', restoreErr);
+          }
+        }
+        throw err;
+      }
     },
-    [startLocalStream, selectedDevices.audioIn]
+    [isVideoOff, loadDevices, selectedDevices.videoIn]
   );
 
   const setSpeakerDevice = useCallback((deviceId) => {
