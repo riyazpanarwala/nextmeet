@@ -90,6 +90,15 @@ export function Controls({
     }
   };
 
+  const handleCycleCamera = async () => {
+    if (devices.videoIn.length < 2) return;
+    const currentIndex = devices.videoIn.findIndex((d) => d.deviceId === selectedDevices.videoIn);
+    const nextIndex = currentIndex >= 0
+      ? (currentIndex + 1) % devices.videoIn.length
+      : 0;
+    await handleDeviceSwitch(onSwitchVideo, devices.videoIn[nextIndex].deviceId, 'camera');
+  };
+
   // Feature-detect getDisplayMedia — unavailable on iOS Safari (and any
   // WebKit-based iOS browser) and some embedded webviews. Without this,
   // the button looks enabled but silently fails when tapped there.
@@ -243,6 +252,15 @@ export function Controls({
             </option>
           ))}
         </select>
+        {devices.videoIn.length > 1 && (
+          <button
+            type="button"
+            className="settings-action-btn"
+            onClick={handleCycleCamera}
+          >
+            Switch Camera
+          </button>
+        )}
 
         <label>Speaker</label>
         <select

@@ -108,6 +108,13 @@ export function useMediaDevices() {
       setIsVideoOff(nextVideoOff);
       setHasAudioTrack(gotAudio);
       setHasVideoTrack(gotVideo);
+      const activeAudioDeviceId = stream.getAudioTracks()[0]?.getSettings?.().deviceId || '';
+      const activeVideoDeviceId = stream.getVideoTracks()[0]?.getSettings?.().deviceId || '';
+      setSelectedDevices((prev) => ({
+        ...prev,
+        audioIn: activeAudioDeviceId || audioDeviceId || prev.audioIn,
+        videoIn: activeVideoDeviceId || videoDeviceId || prev.videoIn,
+      }));
       await loadDevices();
       return stream;
     },
@@ -171,7 +178,6 @@ export function useMediaDevices() {
 
   const switchAudioDevice = useCallback(
     async (deviceId) => {
-      setSelectedDevices((prev) => ({ ...prev, audioIn: deviceId }));
       const newStream = await startLocalStream(deviceId, selectedDevices.videoIn);
       return newStream;
     },
@@ -180,7 +186,6 @@ export function useMediaDevices() {
 
   const switchVideoDevice = useCallback(
     async (deviceId) => {
-      setSelectedDevices((prev) => ({ ...prev, videoIn: deviceId }));
       const newStream = await startLocalStream(selectedDevices.audioIn, deviceId);
       return newStream;
     },

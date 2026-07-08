@@ -705,6 +705,21 @@ select option { background: var(--surface2); }
   color: var(--text-muted);
   margin-top: 4px;
 }
+.settings-action-btn {
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(59,130,246,0.12);
+  border: 1px solid rgba(59,130,246,0.28);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.18s;
+}
+.settings-action-btn:hover {
+  background: var(--accent);
+  color: white;
+}
 
 /* ═══════════════════════════════════════════
    SIDE PANELS (Chat + Participants)
