@@ -1005,6 +1005,10 @@ select option { background: var(--surface2); }
   .lobby {
     align-items: flex-start;
     padding-top: 0;
+    height: 100%;
+    min-height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .lobby-card {
     flex-direction: column;
@@ -1016,12 +1020,17 @@ select option { background: var(--surface2); }
     border-left: none;
     border-right: none;
     border-top: none;
-    min-height: 100%;
-    overflow-y: auto;
+    min-height: auto;
+    overflow: visible;
   }
   .lobby-preview {
-    min-height: 220px;
+    flex: 0 0 auto;
+    height: 190px;
+    min-height: 190px;
     border-radius: var(--radius);
+  }
+  .lobby-form {
+    flex: 0 0 auto;
   }
   .lobby-preview video { object-position: center top; }
   .lobby-form h1 { font-size: 22px; }
