@@ -31,10 +31,28 @@ export function usePeerConnections({
   // entirely, regardless of what the browser hands back.
   const remoteStreams = useRef({});
 
-  // socketId -> RTCPeerConnection (dedicated screen-share connection)
-  const screenPeerConnections = useRef({});
-  const screenIceCandidateQueues = useRef({});
-  const remoteScreenStreams = useRef({});
+  // ══════════════════════════════════════════════════════════════
+  // SCREEN-SHARE PEER CONNECTIONS — direction-aware.
+  //
+  // A single remoteSocketId can simultaneously be:
+  //   - the target of a PC I created to SEND my screen to them, and
+  //   - the source of a separate PC I created to RECEIVE their screen.
+  //
+  // These must live in two SEPARATE maps keyed by remoteSocketId.
+  // Sharing one map keyed only by remoteSocketId (the old approach)
+  // meant that whichever direction was created first "won" — later
+  // calls for the opposite direction would silently reuse that PC
+  // instead of creating their own, dropping tracks/offers on the floor
+  // and corrupting the connection that was already working. This is
+  // exactly what caused: (a) a second user's screen share never
+  // reaching the first user, and (b) the first user's already-working
+  // share appearing frozen once the second user started sharing.
+  // ══════════════════════════════════════════════════════════════
+  const outgoingScreenPCs = useRef({});        // remoteSocketId -> PC (I am the sender)
+  const incomingScreenPCs = useRef({});        // remoteSocketId -> PC (I am the receiver)
+  const outgoingScreenIceQueues = useRef({});
+  const incomingScreenIceQueues = useRef({});
+  const remoteScreenStreams = useRef({});       // only ever populated for incoming PCs
 
   const getOrCreateStream = useCallback((map, remoteSocketId) => {
     if (!map.current[remoteSocketId]) {
@@ -289,26 +307,38 @@ export function usePeerConnections({
   }, []);
 
   // ══════════════════════════════════════════════════════════════
-  // SCREEN-SHARE PEER CONNECTIONS (dedicated, separate from camera PCs)
+  // SCREEN-SHARE PEER CONNECTIONS (direction-aware)
   //
-  // Each screen share gets its own RTCPeerConnection per remote peer.
-  // The SHARER creates a send-only PC per viewer (Approach B). Viewers
-  // create a receive-only PC on offer. This keeps the camera PC fully
-  // untouched — the sharer's own camera tile never disappears — and
-  // avoids needing renegotiation/mid-tracking on the camera connection.
+  // Each screen share gets its own RTCPeerConnection per remote peer,
+  // and — critically — a separate PC exists per DIRECTION. The SHARER
+  // creates a send-only PC per viewer, stored in outgoingScreenPCs.
+  // Viewers create a receive-only PC on offer, stored in
+  // incomingScreenPCs. A single remoteSocketId may have an entry in
+  // BOTH maps at once (mutual screen sharing) without conflict.
+  //
+  // This keeps the camera PC fully untouched — the sharer's own
+  // camera tile never disappears — and avoids needing renegotiation/
+  // mid-tracking on the camera connection.
   // ══════════════════════════════════════════════════════════════
 
   const createScreenPeerConnection = useCallback(
     (remoteSocketId, isSender, screenStream) => {
-      if (screenPeerConnections.current[remoteSocketId]) {
-        return screenPeerConnections.current[remoteSocketId];
+      const map = isSender ? outgoingScreenPCs : incomingScreenPCs;
+      const queueMap = isSender ? outgoingScreenIceQueues : incomingScreenIceQueues;
+
+      if (map.current[remoteSocketId]) {
+        return map.current[remoteSocketId];
       }
 
-      console.log('[ScreenPC] Creating screen peer connection for:', remoteSocketId, isSender ? '(sender)' : '(receiver)');
+      console.log(
+        '[ScreenPC] Creating', isSender ? 'OUTGOING' : 'INCOMING',
+        'screen peer connection for:', remoteSocketId
+      );
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      screenIceCandidateQueues.current[remoteSocketId] = [];
+      queueMap.current[remoteSocketId] = [];
       pc._negotiationReady = false;
       pc._makingOffer = false;
+      pc._isSender = isSender; // handy for debugging
 
       // Add every track from the screen stream — video AND audio (tab/
       // system audio, when the browser/user grants it) — not just video.
@@ -342,34 +372,39 @@ export function usePeerConnections({
 
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
-        console.log('[ScreenPC] Connection state:', state, 'for', remoteSocketId);
+        console.log('[ScreenPC]', isSender ? 'OUTGOING' : 'INCOMING', 'connection state:', state, 'for', remoteSocketId);
         if (state === 'failed') {
           pc.restartIce();
         }
         if (state === 'disconnected' || state === 'closed') {
-          onScreenPeerLeft?.(remoteSocketId);
+          // Only the incoming leg's death should clear the viewer's tile —
+          // losing our outgoing leg doesn't mean their incoming share (if
+          // they're also sharing to us) died too.
+          if (!isSender) onScreenPeerLeft?.(remoteSocketId);
         }
       };
 
       // Same persistent-stream approach as the camera PC — don't trust
       // the browser's streams[0] identity across the separate video/audio
-      // ontrack events.
-      pc.ontrack = ({ track }) => {
-        console.log('[ScreenPC] Got remote screen track from', remoteSocketId, track.kind);
-        const remoteStream = getOrCreateStream(remoteScreenStreams, remoteSocketId);
-        upsertTrack(remoteStream, track);
-        onRemoteScreenStream(remoteSocketId, remoteStream);
-      };
+      // ontrack events. Only relevant for the receiving side.
+      if (!isSender) {
+        pc.ontrack = ({ track }) => {
+          console.log('[ScreenPC] Got remote screen track from', remoteSocketId, track.kind);
+          const remoteStream = getOrCreateStream(remoteScreenStreams, remoteSocketId);
+          upsertTrack(remoteStream, track);
+          onRemoteScreenStream(remoteSocketId, remoteStream);
+        };
+      }
 
-      screenPeerConnections.current[remoteSocketId] = pc;
+      map.current[remoteSocketId] = pc;
       return pc;
     },
     [socket, onRemoteScreenStream, onScreenPeerLeft, getOrCreateStream, upsertTrack]
   );
 
-  const drainScreenIceQueue = useCallback(async (remoteSocketId) => {
-    const pc = screenPeerConnections.current[remoteSocketId];
-    const queue = screenIceCandidateQueues.current[remoteSocketId] || [];
+  const drainScreenIceQueue = useCallback(async (map, queueMap, remoteSocketId) => {
+    const pc = map.current[remoteSocketId];
+    const queue = queueMap.current[remoteSocketId] || [];
     if (!pc || queue.length === 0) return;
 
     console.log('[ScreenPC] Draining', queue.length, 'queued ICE candidates for', remoteSocketId);
@@ -380,11 +415,12 @@ export function usePeerConnections({
         console.warn('[ScreenPC] Failed to add queued ICE candidate:', err);
       }
     }
-    screenIceCandidateQueues.current[remoteSocketId] = [];
+    queueMap.current[remoteSocketId] = [];
   }, []);
 
   // Called by the SHARER for each remote participant (existing + late joiners).
   // `screenStream` is the FULL MediaStream from getDisplayMedia (video + audio).
+  // Always creates/uses the OUTGOING-direction PC for remoteSocketId.
   const makeScreenOffer = useCallback(
     async (remoteSocketId, screenStream) => {
       const pc = createScreenPeerConnection(remoteSocketId, true, screenStream);
@@ -404,13 +440,16 @@ export function usePeerConnections({
     [createScreenPeerConnection, socket]
   );
 
-  // Called by VIEWERS when a screen-share offer arrives
+  // Called by VIEWERS when a screen-share offer arrives. Always creates/uses
+  // the INCOMING-direction PC for remoteSocketId — completely independent of
+  // any OUTGOING PC we might also have open to that same remoteSocketId
+  // (e.g. if we're also sharing our screen back to them).
   const handleScreenOffer = useCallback(
     async (remoteSocketId, offer) => {
       const pc = createScreenPeerConnection(remoteSocketId, false);
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        await drainScreenIceQueue(remoteSocketId);
+        await drainScreenIceQueue(incomingScreenPCs, incomingScreenIceQueues, remoteSocketId);
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -424,53 +463,95 @@ export function usePeerConnections({
     [createScreenPeerConnection, drainScreenIceQueue, socket]
   );
 
+  // An answer only ever responds to an offer WE sent — i.e. it always
+  // targets our OUTGOING PC to that peer, never the incoming one.
   const handleScreenAnswer = useCallback(async (remoteSocketId, answer) => {
-    const pc = screenPeerConnections.current[remoteSocketId];
+    const pc = outgoingScreenPCs.current[remoteSocketId];
     if (!pc) {
-      console.warn('[ScreenPC] handleScreenAnswer: no PC for', remoteSocketId);
+      console.warn('[ScreenPC] handleScreenAnswer: no outgoing PC for', remoteSocketId);
       return;
     }
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
       pc._negotiationReady = true;
       pc._makingOffer = false;
-      await drainScreenIceQueue(remoteSocketId);
+      await drainScreenIceQueue(outgoingScreenPCs, outgoingScreenIceQueues, remoteSocketId);
     } catch (err) {
       console.error('[ScreenPC] handleScreenAnswer error:', err);
     }
   }, [drainScreenIceQueue]);
 
+  // ICE candidates don't self-identify which direction's PC they belong
+  // to, and it's valid for BOTH an outgoing and incoming PC to the same
+  // remoteSocketId to exist simultaneously (mutual screen sharing), so
+  // apply/queue the candidate against whichever PC(s) actually exist for
+  // that socket.
   const handleScreenIceCandidate = useCallback(async (remoteSocketId, candidate) => {
-    const pc = screenPeerConnections.current[remoteSocketId];
     const rtcCandidate = new RTCIceCandidate(candidate);
+    const targets = [
+      [outgoingScreenPCs, outgoingScreenIceQueues],
+      [incomingScreenPCs, incomingScreenIceQueues],
+    ];
 
-    if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
-      screenIceCandidateQueues.current[remoteSocketId] =
-        screenIceCandidateQueues.current[remoteSocketId] || [];
-      screenIceCandidateQueues.current[remoteSocketId].push(rtcCandidate);
-      return;
+    let appliedToAny = false;
+    for (const [map, queueMap] of targets) {
+      const pc = map.current[remoteSocketId];
+      if (!pc) continue;
+      appliedToAny = true;
+      if (!pc.remoteDescription || !pc.remoteDescription.type) {
+        queueMap.current[remoteSocketId] = queueMap.current[remoteSocketId] || [];
+        queueMap.current[remoteSocketId].push(rtcCandidate);
+      } else {
+        try {
+          await pc.addIceCandidate(rtcCandidate);
+        } catch (err) {
+          // Can happen when a candidate intended for the *other*
+          // direction's PC is tried here first — not fatal, the other
+          // map entry (if any) will pick it up.
+        }
+      }
     }
-
-    try {
-      await pc.addIceCandidate(rtcCandidate);
-    } catch (err) {
-      console.warn('[ScreenPC] addIceCandidate error:', err);
+    if (!appliedToAny) {
+      console.warn('[ScreenPC] handleScreenIceCandidate: no PC (in or out) for', remoteSocketId);
     }
   }, []);
 
-  const closeScreenPeer = useCallback((remoteSocketId) => {
-    const pc = screenPeerConnections.current[remoteSocketId];
+  // Close only the leg where WE are sending our screen to remoteSocketId.
+  // Use this when the LOCAL user stops sharing — any share we're still
+  // receiving FROM that peer must be left untouched.
+  const closeOutgoingScreenPeer = useCallback((remoteSocketId) => {
+    const pc = outgoingScreenPCs.current[remoteSocketId];
     if (pc) {
       pc.close();
-      delete screenPeerConnections.current[remoteSocketId];
-      delete screenIceCandidateQueues.current[remoteSocketId];
+      delete outgoingScreenPCs.current[remoteSocketId];
+      delete outgoingScreenIceQueues.current[remoteSocketId];
+    }
+  }, []);
+
+  // Close only the leg where remoteSocketId is sending their screen to US.
+  // Use this when a REMOTE peer stops sharing — any share we're sending
+  // TO that peer must be left untouched.
+  const closeIncomingScreenPeer = useCallback((remoteSocketId) => {
+    const pc = incomingScreenPCs.current[remoteSocketId];
+    if (pc) {
+      pc.close();
+      delete incomingScreenPCs.current[remoteSocketId];
+      delete incomingScreenIceQueues.current[remoteSocketId];
       delete remoteScreenStreams.current[remoteSocketId];
     }
   }, []);
 
+  // Full teardown of both legs — use only when the peer leaves the room
+  // entirely (their socket disconnected), not for a single share stopping.
+  const closeScreenPeer = useCallback((remoteSocketId) => {
+    closeOutgoingScreenPeer(remoteSocketId);
+    closeIncomingScreenPeer(remoteSocketId);
+  }, [closeOutgoingScreenPeer, closeIncomingScreenPeer]);
+
   const closeAllScreenPeers = useCallback(() => {
-    Object.keys(screenPeerConnections.current).forEach(closeScreenPeer);
-  }, [closeScreenPeer]);
+    Object.keys(outgoingScreenPCs.current).forEach(closeOutgoingScreenPeer);
+    Object.keys(incomingScreenPCs.current).forEach(closeIncomingScreenPeer);
+  }, [closeOutgoingScreenPeer, closeIncomingScreenPeer]);
 
   return {
     peerConnections: peerConnections.current,
@@ -482,13 +563,16 @@ export function usePeerConnections({
     closeAll,
     replaceTrack,
 
-    // Screen-share pool
-    screenPeerConnections: screenPeerConnections.current,
+    // Screen-share pools (direction-aware — see notes above)
+    outgoingScreenPCs: outgoingScreenPCs.current,
+    incomingScreenPCs: incomingScreenPCs.current,
     makeScreenOffer,
     handleScreenOffer,
     handleScreenAnswer,
     handleScreenIceCandidate,
-    closeScreenPeer,
+    closeOutgoingScreenPeer,
+    closeIncomingScreenPeer,
+    closeScreenPeer,          // both legs — use only on full peer departure
     closeAllScreenPeers,
   };
 }
