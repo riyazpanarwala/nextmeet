@@ -1,5 +1,44 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
+const CAMERA_VIDEO_CONSTRAINT = {
+  width: { ideal: 1280, max: 1280 },
+  height: { ideal: 720, max: 720 },
+  frameRate: { ideal: 30, max: 30 },
+  resizeMode: 'crop-and-scale',
+};
+
+const SCREEN_VIDEO_CONSTRAINT = {
+  cursor: 'always',
+  width: { ideal: 1920, max: 1920 },
+  height: { ideal: 1080, max: 1080 },
+  frameRate: { ideal: 30, max: 30 },
+};
+
+const AUDIO_CONSTRAINT = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  channelCount: { ideal: 1 },
+  sampleRate: { ideal: 48000 },
+  latency: { ideal: 0.02 },
+};
+
+function applyContentHint(track, hint) {
+  if (!track || !('contentHint' in track)) return;
+
+  try {
+    track.contentHint = hint;
+  } catch (err) {
+    console.warn('[Media] Could not apply content hint:', err);
+  }
+}
+
+function getVideoConstraint(deviceId) {
+  return deviceId
+    ? { ...CAMERA_VIDEO_CONSTRAINT, deviceId: { exact: deviceId } }
+    : CAMERA_VIDEO_CONSTRAINT;
+}
+
 export function useMediaDevices() {
   const localStreamRef = useRef(null);
   const [localStream, setLocalStream] = useState(null);
@@ -40,21 +79,10 @@ export function useMediaDevices() {
         throw new Error('Camera and microphone require HTTPS or localhost in this browser.');
       }
 
-      const videoConstraint = videoDeviceId
-        ? {
-            deviceId: { exact: videoDeviceId },
-            width: { ideal: 1280, max: 1280 },
-            height: { ideal: 720, max: 720 },
-            frameRate: { ideal: 24, max: 24 },
-          }
-        : {
-            width: { ideal: 1280, max: 1280 },
-            height: { ideal: 720, max: 720 },
-            frameRate: { ideal: 24, max: 24 },
-          };
+      const videoConstraint = getVideoConstraint(videoDeviceId);
       const audioConstraint = audioDeviceId
-        ? { deviceId: { exact: audioDeviceId }, echoCancellation: true, noiseSuppression: true }
-        : { echoCancellation: true, noiseSuppression: true };
+        ? { ...AUDIO_CONSTRAINT, deviceId: { exact: audioDeviceId } }
+        : AUDIO_CONSTRAINT;
 
       let stream;
       let gotAudio = true;
@@ -100,7 +128,10 @@ export function useMediaDevices() {
       const nextVideoOff = Boolean(initialState.isVideoOff) || !gotVideo;
 
       stream.getAudioTracks().forEach((track) => { track.enabled = !nextMuted; });
-      stream.getVideoTracks().forEach((track) => { track.enabled = !nextVideoOff; });
+      stream.getVideoTracks().forEach((track) => {
+        applyContentHint(track, 'motion');
+        track.enabled = !nextVideoOff;
+      });
 
       localStreamRef.current = stream;
       setLocalStream(stream);
@@ -146,13 +177,11 @@ export function useMediaDevices() {
       }
 
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: 'always',
-          frameRate: { ideal: 15, max: 15 },
-        },
+        video: SCREEN_VIDEO_CONSTRAINT,
         audio: true,
       });
       screenStreamRef.current = screenStream;
+      screenStream.getVideoTracks().forEach((track) => applyContentHint(track, 'detail'));
 
       // When screen share ends via the browser's built-in stop button
       screenStream.getVideoTracks()[0].onended = () => {
@@ -198,25 +227,17 @@ export function useMediaDevices() {
         '';
 
       const captureVideoDevice = async (targetDeviceId) => {
-        const videoConstraint = targetDeviceId
-          ? {
-              deviceId: { exact: targetDeviceId },
-              width: { ideal: 1280, max: 1280 },
-              height: { ideal: 720, max: 720 },
-              frameRate: { ideal: 24, max: 24 },
-            }
-          : {
-              width: { ideal: 1280, max: 1280 },
-              height: { ideal: 720, max: 720 },
-              frameRate: { ideal: 24, max: 24 },
-            };
+        const videoConstraint = getVideoConstraint(targetDeviceId);
 
         const videoOnlyStream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: videoConstraint,
         });
         const videoTracks = videoOnlyStream.getVideoTracks();
-        videoTracks.forEach((track) => { track.enabled = !isVideoOff; });
+        videoTracks.forEach((track) => {
+          applyContentHint(track, 'motion');
+          track.enabled = !isVideoOff;
+        });
 
         const nextStream = new MediaStream([...currentAudioTracks, ...videoTracks]);
         const activeVideoDeviceId = videoTracks[0]?.getSettings?.().deviceId || targetDeviceId || '';

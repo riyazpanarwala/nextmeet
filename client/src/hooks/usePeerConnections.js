@@ -1,24 +1,29 @@
 import { useRef, useCallback } from 'react';
 
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-  // Add TURN for production (needed behind symmetric NAT):
-  // { urls: 'turn:your-server:3478', username: 'user', credential: 'pass' },
-];
+const PEER_CONNECTION_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  ],
+  iceCandidatePoolSize: 4,
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
+};
 
 const CAMERA_VIDEO_ENCODING = {
-  maxBitrate: 700_000,
-  maxFramerate: 24,
+  maxBitrate: 2_000_000,
+  maxFramerate: 30,
+  scaleResolutionDownBy: 1,
 };
 
 const SCREEN_VIDEO_ENCODING = {
-  maxBitrate: 1_500_000,
-  maxFramerate: 15,
+  maxBitrate: 6_000_000,
+  maxFramerate: 30,
+  scaleResolutionDownBy: 1,
 };
 
-async function applySenderEncoding(sender, encoding) {
+async function applySenderEncoding(sender, encoding, degradationPreference = 'balanced') {
   if (!sender?.track || sender.track.kind !== 'video') return;
 
   try {
@@ -28,7 +33,13 @@ async function applySenderEncoding(sender, encoding) {
       ...params.encodings[0],
       ...encoding,
     };
-    await sender.setParameters(params);
+    params.degradationPreference = degradationPreference;
+    try {
+      await sender.setParameters(params);
+    } catch (err) {
+      delete params.degradationPreference;
+      await sender.setParameters(params);
+    }
   } catch (err) {
     console.warn('[PC] Could not apply sender encoding constraints:', err);
   }
@@ -113,7 +124,7 @@ export function usePeerConnections({
       }
 
       console.log('[PC] Creating peer connection for:', remoteSocketId);
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection(PEER_CONNECTION_CONFIG);
       iceCandidateQueues.current[remoteSocketId] = [];
 
       // Gates onnegotiationneeded so it only fires *after* the initial
@@ -132,7 +143,7 @@ export function usePeerConnections({
         tracks.forEach((track) => {
           const sender = pc.addTrack(track, stream);
           if (track.kind === 'video') {
-            void applySenderEncoding(sender, CAMERA_VIDEO_ENCODING);
+            void applySenderEncoding(sender, CAMERA_VIDEO_ENCODING, 'balanced');
           }
         });
       } else {
@@ -340,7 +351,7 @@ export function usePeerConnections({
       if (!sender) return;
       await sender.replaceTrack(newTrack);
       if (newTrack?.kind === 'video') {
-        await applySenderEncoding(sender, CAMERA_VIDEO_ENCODING);
+        await applySenderEncoding(sender, CAMERA_VIDEO_ENCODING, 'balanced');
       }
     });
     await Promise.all(promises);
@@ -374,7 +385,7 @@ export function usePeerConnections({
         '[ScreenPC] Creating', isSender ? 'OUTGOING' : 'INCOMING',
         'screen peer connection for:', remoteSocketId
       );
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection(PEER_CONNECTION_CONFIG);
       queueMap.current[remoteSocketId] = [];
       pc._negotiationReady = false;
       pc._makingOffer = false;
@@ -386,7 +397,7 @@ export function usePeerConnections({
         screenStream.getTracks().forEach((track) => {
           const sender = pc.addTrack(track, screenStream);
           if (track.kind === 'video') {
-            void applySenderEncoding(sender, SCREEN_VIDEO_ENCODING);
+            void applySenderEncoding(sender, SCREEN_VIDEO_ENCODING, 'maintain-resolution');
           }
         });
       }
