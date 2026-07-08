@@ -369,17 +369,34 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   // ── Screen sharing (Approach B: dedicated peer connections per share) ──
   // Camera PCs are never touched here — the sharer's own camera tile
   // stays visible the whole time, and a separate screen tile is added.
+  //
+  // stopScreenSharing is a dedicated, stable function (not routed through
+  // handleToggleScreen). This matters because screenTrack.onended fires
+  // from a browser event (native "Stop sharing" bar) whose handler was
+  // registered at share-start time. If onended called handleToggleScreen
+  // directly, it would re-invoke a closure where isScreenSharing was still
+  // `false` (captured before the state update from starting the share),
+  // causing it to run the START branch again instead of stopping — leaving
+  // sockets/peer connections in a broken half-state. Branching on the ref
+  // (isScreenSharingRef.current, always fresh) and calling this dedicated
+  // stop function directly avoids that stale-closure bug entirely.
+  const stopScreenSharing = useCallback(() => {
+    stopScreenShare();
+    socket.emit('screen-share-stopped', { roomId: localInfo.roomId });
+    Object.keys(remoteParticipantsRef.current).forEach((id) => {
+      closeScreenPeerRef.current(id);
+    });
+    isScreenSharingRef.current = false;
+    screenTrackRef.current = null;
+    screenSenderRef.current = null;
+  }, [stopScreenShare, socket, localInfo]);
+
   const handleToggleScreen = useCallback(async () => {
-    if (isScreenSharing) {
-      // ── Stop sharing ──
-      stopScreenShare();
-      socket.emit('screen-share-stopped', { roomId: localInfo.roomId });
-      Object.keys(remoteParticipantsRef.current).forEach((id) => {
-        closeScreenPeerRef.current(id);
-      });
-      isScreenSharingRef.current = false;
-      screenTrackRef.current = null;
-      screenSenderRef.current = null;
+    // Branch on the ref, not the `isScreenSharing` state/prop — the state
+    // can be stale inside closures (e.g. screenTrack.onended) that were
+    // created before a React re-render picked up the new value.
+    if (isScreenSharingRef.current) {
+      stopScreenSharing();
       return;
     }
 
@@ -411,12 +428,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         });
       });
 
-      screenTrack.onended = () => handleToggleScreen();
+      // Call the stable stop function directly — NOT handleToggleScreen —
+      // so the browser's native "Stop sharing" button runs the exact same
+      // cleanup path as our own Stop button, regardless of closure staleness.
+      screenTrack.onended = () => stopScreenSharing();
     } catch (err) {
       console.error('Screen share failed:', err);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isScreenSharing, startScreenShare, stopScreenShare, socket, localInfo, activeSharerIds]);
+  }, [startScreenShare, stopScreenShare, stopScreenSharing, socket, localInfo, activeSharerIds]);
 
   const handleSendMessage = useCallback(
     (text) => socket.emit('chat-message', { roomId: localInfo.roomId, message: text }),
