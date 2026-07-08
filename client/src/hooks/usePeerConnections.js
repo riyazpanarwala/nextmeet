@@ -20,10 +20,43 @@ export function usePeerConnections({
   const peerConnections = useRef({});
   // socketId -> RTCIceCandidate[] (queued before remoteDescription is set)
   const iceCandidateQueues = useRef({});
+  // socketId -> persistent MediaStream we build ourselves from incoming
+  // tracks. We do NOT rely on the browser's `streams[0]` identity from
+  // ontrack staying consistent across the audio-track event and the
+  // video-track event — some mobile Safari/WebKit builds report a
+  // different stream object per track in certain negotiation orders,
+  // which silently overwrote the video-bearing stream with an
+  // audio-only one (camera appeared to "go missing"). Owning the
+  // MediaStream ourselves and just adding tracks to it sidesteps that
+  // entirely, regardless of what the browser hands back.
+  const remoteStreams = useRef({});
 
   // socketId -> RTCPeerConnection (dedicated screen-share connection)
   const screenPeerConnections = useRef({});
   const screenIceCandidateQueues = useRef({});
+  const remoteScreenStreams = useRef({});
+
+  const getOrCreateStream = useCallback((map, remoteSocketId) => {
+    if (!map.current[remoteSocketId]) {
+      map.current[remoteSocketId] = new MediaStream();
+    }
+    return map.current[remoteSocketId];
+  }, []);
+
+  // Add `track` to `stream`, replacing any existing track of the same
+  // kind first. Safe to call multiple times for the same track (e.g. if
+  // ontrack somehow fires twice) — it's a no-op the second time.
+  const upsertTrack = useCallback((stream, track) => {
+    stream.getTracks()
+      .filter((t) => t.kind === track.kind && t !== track)
+      .forEach((t) => stream.removeTrack(t));
+    if (!stream.getTracks().includes(track)) {
+      stream.addTrack(track);
+    }
+    track.onended = () => {
+      if (stream.getTracks().includes(track)) stream.removeTrack(track);
+    };
+  }, []);
 
   // ══════════════════════════════════════════════════════════════
   // CAMERA / MIC PEER CONNECTIONS
@@ -110,24 +143,24 @@ export function usePeerConnections({
       };
 
       // ── Remote tracks arriving ──
-      // ontrack fires once per track; we collect into a MediaStream
-      const remoteStream = new MediaStream();
-      pc.ontrack = ({ track, streams }) => {
+      // ontrack fires once per track (once for audio, once for video).
+      // We deliberately IGNORE the browser-provided `streams[0]` for
+      // identity purposes and instead maintain our own persistent
+      // MediaStream per remote peer, adding each incoming track to it.
+      // This guarantees the audio and video tracks always end up on the
+      // SAME stream object we hand to the UI, even on browsers/devices
+      // that report inconsistent stream identities across track events.
+      pc.ontrack = ({ track }) => {
         console.log('[PC] Got remote track:', track.kind, 'from', remoteSocketId);
-        if (streams && streams[0]) {
-          // Use the stream provided by the browser — preferred
-          onRemoteStream(remoteSocketId, streams[0]);
-        } else {
-          // Fallback: manually build a MediaStream
-          remoteStream.addTrack(track);
-          onRemoteStream(remoteSocketId, remoteStream);
-        }
+        const remoteStream = getOrCreateStream(remoteStreams, remoteSocketId);
+        upsertTrack(remoteStream, track);
+        onRemoteStream(remoteSocketId, remoteStream);
       };
 
       peerConnections.current[remoteSocketId] = pc;
       return pc;
     },
-    [socket, localStreamRef, onRemoteStream, onPeerLeft]
+    [socket, localStreamRef, onRemoteStream, onPeerLeft, getOrCreateStream, upsertTrack]
   );
 
   // Drain any ICE candidates that arrived before remoteDescription was set
@@ -239,6 +272,7 @@ export function usePeerConnections({
       pc.close();
       delete peerConnections.current[remoteSocketId];
       delete iceCandidateQueues.current[remoteSocketId];
+      delete remoteStreams.current[remoteSocketId];
     }
   }, []);
 
@@ -278,8 +312,6 @@ export function usePeerConnections({
 
       // Add every track from the screen stream — video AND audio (tab/
       // system audio, when the browser/user grants it) — not just video.
-      // Previously only the video track was ever passed in here, so
-      // remote viewers never received screen-share audio.
       if (isSender && screenStream) {
         screenStream.getTracks().forEach((track) => pc.addTrack(track, screenStream));
       }
@@ -319,21 +351,20 @@ export function usePeerConnections({
         }
       };
 
-      const remoteStream = new MediaStream();
-      pc.ontrack = ({ track, streams }) => {
+      // Same persistent-stream approach as the camera PC — don't trust
+      // the browser's streams[0] identity across the separate video/audio
+      // ontrack events.
+      pc.ontrack = ({ track }) => {
         console.log('[ScreenPC] Got remote screen track from', remoteSocketId, track.kind);
-        if (streams && streams[0]) {
-          onRemoteScreenStream(remoteSocketId, streams[0]);
-        } else {
-          remoteStream.addTrack(track);
-          onRemoteScreenStream(remoteSocketId, remoteStream);
-        }
+        const remoteStream = getOrCreateStream(remoteScreenStreams, remoteSocketId);
+        upsertTrack(remoteStream, track);
+        onRemoteScreenStream(remoteSocketId, remoteStream);
       };
 
       screenPeerConnections.current[remoteSocketId] = pc;
       return pc;
     },
-    [socket, onRemoteScreenStream, onScreenPeerLeft]
+    [socket, onRemoteScreenStream, onScreenPeerLeft, getOrCreateStream, upsertTrack]
   );
 
   const drainScreenIceQueue = useCallback(async (remoteSocketId) => {
@@ -433,6 +464,7 @@ export function usePeerConnections({
       pc.close();
       delete screenPeerConnections.current[remoteSocketId];
       delete screenIceCandidateQueues.current[remoteSocketId];
+      delete remoteScreenStreams.current[remoteSocketId];
     }
   }, []);
 

@@ -405,6 +405,13 @@ select option { background: var(--surface2); }
   object-fit: cover;
   display: block;
 }
+/* Screen shares must never crop — letterbox instead so nothing (like the
+   top/bottom of the shared screen) gets cut off, regardless of how the
+   container's aspect ratio compares to the actual screen being shared. */
+.video-tile.screen-share video {
+  object-fit: contain;
+  background: #000;
+}
 .avatar-fallback {
   position: absolute;
   inset: 0;
