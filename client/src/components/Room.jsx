@@ -90,7 +90,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     makeOffer, handleOffer, handleAnswer,
     handleIceCandidate, closePeer, closeAll, replaceTrack,
     makeScreenOffer, handleScreenOffer, handleScreenAnswer,
-    handleScreenIceCandidate, closeScreenPeer, closeAllScreenPeers,
+    handleScreenIceCandidate, closeOutgoingScreenPeer, closeIncomingScreenPeer,
+    closeScreenPeer, closeAllScreenPeers,
   } = usePeerConnections({
     socket,
     localStreamRef,
@@ -119,11 +120,15 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const handleScreenOfferRef = useRef(handleScreenOffer);
   const handleScreenAnswerRef = useRef(handleScreenAnswer);
   const handleScreenIceCandidateRef = useRef(handleScreenIceCandidate);
+  const closeOutgoingScreenPeerRef = useRef(closeOutgoingScreenPeer);
+  const closeIncomingScreenPeerRef = useRef(closeIncomingScreenPeer);
   const closeScreenPeerRef = useRef(closeScreenPeer);
   useEffect(() => { makeScreenOfferRef.current = makeScreenOffer; }, [makeScreenOffer]);
   useEffect(() => { handleScreenOfferRef.current = handleScreenOffer; }, [handleScreenOffer]);
   useEffect(() => { handleScreenAnswerRef.current = handleScreenAnswer; }, [handleScreenAnswer]);
   useEffect(() => { handleScreenIceCandidateRef.current = handleScreenIceCandidate; }, [handleScreenIceCandidate]);
+  useEffect(() => { closeOutgoingScreenPeerRef.current = closeOutgoingScreenPeer; }, [closeOutgoingScreenPeer]);
+  useEffect(() => { closeIncomingScreenPeerRef.current = closeIncomingScreenPeer; }, [closeIncomingScreenPeer]);
   useEffect(() => { closeScreenPeerRef.current = closeScreenPeer; }, [closeScreenPeer]);
 
   // ── Register socket listeners ONCE, then emit join-room ─────────
@@ -253,7 +258,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       });
 
       if (!sharing) {
-        closeScreenPeerRef.current(socketId);
+        closeIncomingScreenPeerRef.current(socketId);
         setRemoteScreenShares((prev) => {
           const next = { ...prev };
           delete next[socketId];
@@ -366,6 +371,36 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     });
   }, [socket, localInfo, localStreamRef, toggleVideo]);
 
+  const replaceLocalStreamTracks = useCallback(async (oldStream, newStream) => {
+    if (!oldStream || !newStream || oldStream === newStream) return;
+
+    const oldAudioTrack = oldStream.getAudioTracks()[0] || null;
+    const oldVideoTrack = oldStream.getVideoTracks()[0] || null;
+    const newAudioTrack = newStream.getAudioTracks()[0] || null;
+    const newVideoTrack = newStream.getVideoTracks()[0] || null;
+
+    await Promise.all([
+      replaceTrack(oldAudioTrack, newAudioTrack),
+      replaceTrack(oldVideoTrack, newVideoTrack),
+    ]);
+
+    oldStream.getTracks().forEach((track) => track.stop());
+  }, [replaceTrack]);
+
+  const handleSwitchAudioDevice = useCallback(async (deviceId) => {
+    const oldStream = localStreamRef.current;
+    const newStream = await switchAudioDevice(deviceId);
+    await replaceLocalStreamTracks(oldStream, newStream);
+    return newStream;
+  }, [localStreamRef, replaceLocalStreamTracks, switchAudioDevice]);
+
+  const handleSwitchVideoDevice = useCallback(async (deviceId) => {
+    const oldStream = localStreamRef.current;
+    const newStream = await switchVideoDevice(deviceId);
+    await replaceLocalStreamTracks(oldStream, newStream);
+    return newStream;
+  }, [localStreamRef, replaceLocalStreamTracks, switchVideoDevice]);
+
   // ── Screen sharing (Approach B: dedicated peer connections per share) ──
   // Camera PCs are never touched here — the sharer's own camera tile
   // stays visible the whole time, and a separate screen tile is added.
@@ -384,7 +419,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     stopScreenShare();
     socket.emit('screen-share-stopped', { roomId: localInfo.roomId });
     Object.keys(remoteParticipantsRef.current).forEach((id) => {
-      closeScreenPeerRef.current(id);
+      closeOutgoingScreenPeerRef.current(id);
     });
     isScreenSharingRef.current = false;
 
@@ -776,8 +811,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         onMuteAll={handleMuteAll}
         devices={devices}
         selectedDevices={selectedDevices}
-        onSwitchAudio={switchAudioDevice}
-        onSwitchVideo={switchVideoDevice}
+        onSwitchAudio={handleSwitchAudioDevice}
+        onSwitchVideo={handleSwitchVideoDevice}
         onSwitchSpeaker={setSpeakerDevice}
       />
     </div>

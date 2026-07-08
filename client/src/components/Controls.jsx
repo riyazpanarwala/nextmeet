@@ -81,6 +81,15 @@ export function Controls({
     setShowSettings((s) => !s);
   };
 
+  const handleDeviceSwitch = async (switchFn, deviceId, label) => {
+    try {
+      await switchFn(deviceId);
+    } catch (err) {
+      console.error(`[Controls] Could not switch ${label}:`, err);
+      alert(`Could not switch ${label}. Please check the device and try again.`);
+    }
+  };
+
   // Feature-detect getDisplayMedia — unavailable on iOS Safari (and any
   // WebKit-based iOS browser) and some embedded webviews. Without this,
   // the button looks enabled but silently fails when tapped there.
@@ -210,7 +219,7 @@ export function Controls({
           <label>Microphone</label>
           <select
             value={selectedDevices.audioIn}
-            onChange={(e) => onSwitchAudio(e.target.value)}
+            onChange={(e) => handleDeviceSwitch(onSwitchAudio, e.target.value, 'microphone')}
           >
             {devices.audioIn.length === 0 && <option>No microphone found</option>}
             {devices.audioIn.map((d) => (
@@ -223,7 +232,7 @@ export function Controls({
           <label>Camera</label>
           <select
             value={selectedDevices.videoIn}
-            onChange={(e) => onSwitchVideo(e.target.value)}
+            onChange={(e) => handleDeviceSwitch(onSwitchVideo, e.target.value, 'camera')}
           >
             {devices.videoIn.length === 0 && <option>No camera found</option>}
             {devices.videoIn.map((d) => (

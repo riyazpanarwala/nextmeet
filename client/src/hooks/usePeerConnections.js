@@ -8,6 +8,32 @@ const ICE_SERVERS = [
   // { urls: 'turn:your-server:3478', username: 'user', credential: 'pass' },
 ];
 
+const CAMERA_VIDEO_ENCODING = {
+  maxBitrate: 700_000,
+  maxFramerate: 24,
+};
+
+const SCREEN_VIDEO_ENCODING = {
+  maxBitrate: 1_500_000,
+  maxFramerate: 15,
+};
+
+async function applySenderEncoding(sender, encoding) {
+  if (!sender?.track || sender.track.kind !== 'video') return;
+
+  try {
+    const params = sender.getParameters();
+    params.encodings = params.encodings?.length ? params.encodings : [{}];
+    params.encodings[0] = {
+      ...params.encodings[0],
+      ...encoding,
+    };
+    await sender.setParameters(params);
+  } catch (err) {
+    console.warn('[PC] Could not apply sender encoding constraints:', err);
+  }
+}
+
 export function usePeerConnections({
   socket,
   localStreamRef,
@@ -103,7 +129,12 @@ export function usePeerConnections({
       if (stream) {
         const tracks = stream.getTracks();
         console.log('[PC] Adding local tracks:', tracks.map((t) => t.kind));
-        tracks.forEach((track) => pc.addTrack(track, stream));
+        tracks.forEach((track) => {
+          const sender = pc.addTrack(track, stream);
+          if (track.kind === 'video') {
+            void applySenderEncoding(sender, CAMERA_VIDEO_ENCODING);
+          }
+        });
       } else {
         console.warn('[PC] No local stream available when creating PC for', remoteSocketId);
       }
@@ -299,9 +330,18 @@ export function usePeerConnections({
   }, [closePeer]);
 
   const replaceTrack = useCallback(async (oldTrack, newTrack) => {
+    const kind = oldTrack?.kind || newTrack?.kind;
+    if (!kind) return;
     const promises = Object.values(peerConnections.current).map(async (pc) => {
-      const sender = pc.getSenders().find((s) => s.track?.kind === (oldTrack?.kind || newTrack?.kind));
-      if (sender) await sender.replaceTrack(newTrack);
+      const sender = pc.getSenders().find((s) => s.track?.kind === kind)
+        || pc.getTransceivers?.().find((t) =>
+          t.sender && (t.sender.track?.kind === kind || t.receiver?.track?.kind === kind)
+        )?.sender;
+      if (!sender) return;
+      await sender.replaceTrack(newTrack);
+      if (newTrack?.kind === 'video') {
+        await applySenderEncoding(sender, CAMERA_VIDEO_ENCODING);
+      }
     });
     await Promise.all(promises);
   }, []);
@@ -343,7 +383,12 @@ export function usePeerConnections({
       // Add every track from the screen stream — video AND audio (tab/
       // system audio, when the browser/user grants it) — not just video.
       if (isSender && screenStream) {
-        screenStream.getTracks().forEach((track) => pc.addTrack(track, screenStream));
+        screenStream.getTracks().forEach((track) => {
+          const sender = pc.addTrack(track, screenStream);
+          if (track.kind === 'video') {
+            void applySenderEncoding(sender, SCREEN_VIDEO_ENCODING);
+          }
+        });
       }
 
       pc.onicecandidate = ({ candidate }) => {

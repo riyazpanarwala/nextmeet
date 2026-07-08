@@ -36,11 +36,20 @@ export function useMediaDevices() {
   const startLocalStream = useCallback(
     async (audioDeviceId, videoDeviceId, initialState = { isMuted, isVideoOff }) => {
       const videoConstraint = videoDeviceId
-        ? { deviceId: { exact: videoDeviceId }, width: 1280, height: 720 }
-        : { width: 1280, height: 720 };
+        ? {
+            deviceId: { exact: videoDeviceId },
+            width: { ideal: 1280, max: 1280 },
+            height: { ideal: 720, max: 720 },
+            frameRate: { ideal: 24, max: 24 },
+          }
+        : {
+            width: { ideal: 1280, max: 1280 },
+            height: { ideal: 720, max: 720 },
+            frameRate: { ideal: 24, max: 24 },
+          };
       const audioConstraint = audioDeviceId
-        ? { deviceId: { exact: audioDeviceId } }
-        : true;
+        ? { deviceId: { exact: audioDeviceId }, echoCancellation: true, noiseSuppression: true }
+        : { echoCancellation: true, noiseSuppression: true };
 
       let stream;
       let gotAudio = true;
@@ -121,7 +130,10 @@ export function useMediaDevices() {
   const startScreenShare = useCallback(async () => {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always' },
+        video: {
+          cursor: 'always',
+          frameRate: { ideal: 15, max: 15 },
+        },
         audio: true,
       });
       screenStreamRef.current = screenStream;
