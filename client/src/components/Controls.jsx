@@ -290,6 +290,7 @@ export function Controls({
             <PanelCloseButton onClose={closeMore} label="Close" />
           </div>
           <div className="settings-quick-actions">
+            {/* Raise hand doesn't open an overlay panel — no need to close More */}
             <button
               type="button"
               className={`settings-quick-btn mirror-hand ${isHandRaised ? 'active-hand' : ''}`}
@@ -298,30 +299,47 @@ export function Controls({
               <HandIcon />
               <span>{isHandRaised ? 'Lower hand' : 'Raise hand'}</span>
             </button>
+
+            {/* Record opens the Recording side panel — close More so they don't stack */}
             <button
               type="button"
               className={`settings-quick-btn mirror-rec ${isRecording || showRecording ? 'active-rec' : ''}`}
-              onClick={onToggleRecording}
+              onClick={() => {
+                onToggleRecording();
+                closeMore();
+              }}
             >
               <RecordIcon active={isRecording} />
               <span>{isRecording ? 'Recording' : 'Record'}</span>
             </button>
+
+            {/* Chat opens the Chat side panel (which has its own close icon) — close More */}
             <button
               type="button"
               className={`settings-quick-btn mirror-chat ${showChat ? 'active' : ''}`}
-              onClick={onToggleChat}
+              onClick={() => {
+                onToggleChat();
+                closeMore();
+              }}
             >
               <ChatIcon />
               <span>Chat{unreadCount > 0 ? ` (${unreadCount})` : ''}</span>
             </button>
+
+            {/* Participants opens the Participants side panel — close More */}
             <button
               type="button"
               className={`settings-quick-btn mirror-people ${showParticipants ? 'active' : ''}`}
-              onClick={onToggleParticipants}
+              onClick={() => {
+                onToggleParticipants();
+                closeMore();
+              }}
             >
               <ParticipantsIcon />
               <span>People</span>
             </button>
+
+            {/* Mute All is a fire-and-forget action, not a panel — no need to close More */}
             {isHost && (
               <button
                 type="button"
