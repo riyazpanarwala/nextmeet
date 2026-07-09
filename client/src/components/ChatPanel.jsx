@@ -2,7 +2,38 @@ import { useState, useEffect, useRef } from 'react';
 import { PanelCloseButton } from './PanelCloseButton';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
-const REACTIONS = ['+1', 'Heart', 'Ha'];
+const REACTIONS = [
+  {
+    id: 'Like',
+    label: 'Like',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 10v10H4V10h3Zm3 10h7.1c1 0 1.9-.7 2.1-1.7l1-5.1c.2-1.2-.7-2.2-1.9-2.2H14l.6-3.1c.2-1-.1-2-.8-2.7L13 4.4 8.8 9.1c-.5.5-.8 1.2-.8 1.9v7c0 1.1.9 2 2 2Z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'Love',
+    label: 'Love',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 20s-7-4.4-9.2-8.3C1 8.5 2.7 5 6.1 5c2 0 3.2 1.1 3.9 2.1C10.8 6.1 12 5 13.9 5c3.4 0 5.1 3.5 3.3 6.7C19 15.6 12 20 12 20Z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'Laugh',
+    label: 'Laugh',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8" />
+        <path d="M8.5 10h.1M15.4 10h.1M8.8 14c.8 1.4 1.9 2.1 3.2 2.1s2.4-.7 3.2-2.1" />
+      </svg>
+    ),
+  },
+];
+
+const REACTION_BY_ID = Object.fromEntries(REACTIONS.map((reaction) => [reaction.id, reaction]));
 
 function formatBytes(bytes = 0) {
   if (bytes < 1024) return `${bytes} B`;
@@ -134,16 +165,33 @@ export function ChatPanel({ messages, onSend, onReact, localSocketId, onClose })
               <div className="msg-actions">
                 <button type="button" onClick={() => setReplyTo(msg)}>Reply</button>
                 {REACTIONS.map((reaction) => (
-                  <button key={reaction} type="button" onClick={() => onReact(msg.id, reaction)}>
-                    {reaction}
+                  <button
+                    key={reaction.id}
+                    type="button"
+                    className={`msg-reaction-btn reaction-${reaction.id.toLowerCase()}`}
+                    onClick={() => onReact(msg.id, reaction.id)}
+                    title={reaction.label}
+                    aria-label={reaction.label}
+                  >
+                    {reaction.icon}
                   </button>
                 ))}
               </div>
               {reactions.length > 0 && (
                 <div className="msg-reactions">
-                  {reactions.map(([reaction, users]) => (
-                    <span key={reaction}>{reaction} {Object.keys(users || {}).length}</span>
-                  ))}
+                  {reactions.map(([reaction, users]) => {
+                    const reactionMeta = REACTION_BY_ID[reaction];
+                    return (
+                      <span
+                        key={reaction}
+                        className={`reaction-${reaction.toLowerCase()}`}
+                        title={reactionMeta?.label || reaction}
+                      >
+                        {reactionMeta?.icon || reaction}
+                        {Object.keys(users || {}).length}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
               <span className="msg-time">

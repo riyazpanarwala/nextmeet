@@ -364,7 +364,7 @@ io.on('connection', (socket) => {
     if (!participant) return;
 
     const safeReaction = String(reaction || '').slice(0, 20);
-    if (!['+1', 'Heart', 'Ha'].includes(safeReaction)) return;
+    if (!['Like', 'Love', 'Laugh'].includes(safeReaction)) return;
 
     io.to(roomId).emit('chat-reaction', {
       messageId: String(messageId || '').slice(0, 160),
