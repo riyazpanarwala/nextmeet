@@ -239,28 +239,30 @@ export function ChatPanel({ messages, onSend, onReact, localSocketId, onClose })
         </div>
       )}
       <div className="chat-input-row">
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="chat-file-input"
-          onChange={handleFileChange}
-        />
-        <button
-          type="button"
-          className="chat-attach-btn"
-          onClick={() => fileInputRef.current?.click()}
-          title="Attach file"
-          aria-label="Attach file"
-        >
-          <AttachmentIcon />
-        </button>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKey}
-          placeholder="Type a message..."
-          rows={2}
-        />
+        <div className="chat-composer-field">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="chat-file-input"
+            onChange={handleFileChange}
+          />
+          <button
+            type="button"
+            className="chat-attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach file"
+            aria-label="Attach file"
+          >
+            <AttachmentIcon />
+          </button>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Type a message..."
+            rows={2}
+          />
+        </div>
         <button onClick={handleSend} disabled={!input.trim() && !selectedFile}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />

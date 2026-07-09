@@ -1145,12 +1145,13 @@ select option { background: var(--surface2); }
 }
 
 .chat-input-row {
-  padding: 12px 16px;
+  padding: 12px 14px;
   border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
-  align-items: stretch;
+  align-items: flex-end;
   flex-shrink: 0;
+  background: rgba(10,13,20,0.18);
 }
 .chat-compose-meta + .chat-input-row {
   border-top: none;
@@ -1158,13 +1159,35 @@ select option { background: var(--surface2); }
 .chat-file-input {
   display: none;
 }
+.chat-composer-field {
+  flex: 1;
+  min-width: 0;
+  min-height: 46px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 5px 6px 5px 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(26,34,53,0.72);
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+}
+.chat-composer-field:focus-within {
+  border-color: rgba(59,130,246,0.7);
+  background: rgba(26,34,53,0.9);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+}
 .chat-input-row textarea {
   flex: 1;
+  min-width: 0;
   resize: none;
   font-size: 13px;
-  border-radius: var(--radius-sm);
-  min-height: 58px;
-  padding: 11px 12px;
+  min-height: 34px;
+  max-height: 92px;
+  padding: 8px 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   line-height: 1.5;
 }
 .chat-input-row button {
@@ -1182,20 +1205,21 @@ select option { background: var(--surface2); }
 .chat-input-row .chat-attach-btn {
   display: grid;
   place-items: center;
-  align-self: flex-end;
-  height: 42px;
-  background: rgba(26,34,53,0.9);
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-muted);
-  border: 1px solid var(--border);
+  border: none;
 }
 .chat-input-row .chat-attach-btn:hover {
-  border-color: var(--accent);
   color: var(--accent);
-  background: rgba(59,130,246,0.1);
+  background: rgba(59,130,246,0.14);
 }
 .chat-attach-btn svg {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -1204,7 +1228,7 @@ select option { background: var(--surface2); }
 }
 .chat-input-row button:not(.chat-attach-btn) {
   align-self: flex-end;
-  height: 42px;
+  height: 46px;
   display: grid;
   place-items: center;
 }
