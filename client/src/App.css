@@ -580,6 +580,90 @@ select option { background: var(--surface2); }
   border-color: var(--accent);
 }
 
+.tile-annotate-btn {
+  position: absolute;
+  top: 44px;
+  right: 8px;
+  z-index: 4;
+  padding: 6px 10px;
+  border-radius: 20px;
+  background: rgba(15,23,42,0.85);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+  backdrop-filter: blur(6px);
+}
+.video-tile:hover .tile-annotate-btn,
+.video-tile:focus-within .tile-annotate-btn,
+.tile-annotate-btn.granted {
+  opacity: 1;
+}
+.tile-annotate-btn:hover:not(:disabled),
+.tile-annotate-btn.granted {
+  background: var(--green);
+  border-color: var(--green);
+}
+.tile-annotate-btn:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.annotation-access-panel {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(360px, calc(100% - 24px));
+  padding: 8px;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius);
+  background: rgba(15,23,42,0.92);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  backdrop-filter: blur(10px);
+}
+.annotation-access-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.annotation-access-row span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12px;
+}
+.annotation-access-row button {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: 14px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+.annotation-access-row button:hover {
+  background: var(--accent);
+  color: white;
+}
+.annotation-access-row button.danger:hover {
+  background: rgba(239,68,68,0.22);
+  color: var(--red);
+}
+.annotation-access-row.granted span {
+  color: var(--green);
+}
+
 /* "Presenting" badge on the current main tile */
 .tile-primary-badge {
   position: absolute;

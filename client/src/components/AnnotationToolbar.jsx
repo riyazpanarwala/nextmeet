@@ -19,9 +19,38 @@ const CursorIcon = () => (
  * releases pointer capture on the overlay so the presenter can still click
  * through to things like the "Set as Main" pin button underneath.
  */
-export function AnnotationToolbar({ tool, onSelectTool, color, onSelectColor, onUndo, onClear }) {
+export function AnnotationToolbar({
+  tool,
+  onSelectTool,
+  color,
+  onSelectColor,
+  onUndo,
+  onClear,
+  targets = [],
+  activeTargetId,
+  onSelectTarget,
+}) {
   return (
     <div className="annotation-toolbar">
+      {targets.length > 0 && (
+        <>
+          <select
+            className="annot-target-select"
+            value={activeTargetId || targets[0]?.id || ''}
+            onChange={(e) => onSelectTarget?.(e.target.value)}
+            title="Choose screen to annotate"
+          >
+            {targets.map((target) => (
+              <option key={target.id} value={target.id}>
+                {target.label}
+              </option>
+            ))}
+          </select>
+
+          <div className="annot-divider" />
+        </>
+      )}
+
       <button
         type="button"
         className={`annot-btn ${!tool ? 'active' : ''}`}

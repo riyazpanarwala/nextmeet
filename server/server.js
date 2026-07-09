@@ -23,6 +23,9 @@ const MAX_PARTICIPANTS = 6;
 const roomScreenShares = new Map();
 const MAX_SCREEN_SHARES = 2;
 
+// roomId -> Map<screenOwnerId, Set<grantedSocketId>>
+const roomAnnotationGrants = new Map();
+
 function getRoomParticipants(roomId) {
   const room = rooms.get(roomId);
   if (!room) return [];
@@ -35,6 +38,47 @@ function getRoomParticipants(roomId) {
 function getScreenShareSet(roomId) {
   if (!roomScreenShares.has(roomId)) roomScreenShares.set(roomId, new Set());
   return roomScreenShares.get(roomId);
+}
+
+function getAnnotationGrantMap(roomId) {
+  if (!roomAnnotationGrants.has(roomId)) roomAnnotationGrants.set(roomId, new Map());
+  return roomAnnotationGrants.get(roomId);
+}
+
+function getAnnotationGrantSet(roomId, screenOwnerId) {
+  const grants = getAnnotationGrantMap(roomId);
+  if (!grants.has(screenOwnerId)) grants.set(screenOwnerId, new Set());
+  return grants.get(screenOwnerId);
+}
+
+function canAnnotate(roomId, screenOwnerId, socketId) {
+  if (screenOwnerId === socketId) return roomScreenShares.get(roomId)?.has(screenOwnerId) === true;
+  return roomAnnotationGrants.get(roomId)?.get(screenOwnerId)?.has(socketId) === true;
+}
+
+function clearAnnotationAccessForScreen(roomId, screenOwnerId) {
+  const grants = roomAnnotationGrants.get(roomId);
+  const grantedSocketIds = Array.from(grants?.get(screenOwnerId) || []);
+  grants?.delete(screenOwnerId);
+  grantedSocketIds.forEach((socketId) => {
+    io.to(socketId).emit('annotation-access-updated', {
+      screenOwnerId,
+      granted: false,
+    });
+  });
+}
+
+function revokeSocketAnnotationAccess(roomId, socketId) {
+  const grants = roomAnnotationGrants.get(roomId);
+  if (!grants) return;
+  for (const [screenOwnerId, grantedSocketIds] of grants.entries()) {
+    if (grantedSocketIds.delete(socketId)) {
+      io.to(screenOwnerId).emit('annotation-access-revoked', {
+        screenOwnerId,
+        socketId,
+      });
+    }
+  }
 }
 
 io.on('connection', (socket) => {
@@ -166,6 +210,7 @@ io.on('connection', (socket) => {
   socket.on('screen-share-stopped', ({ roomId }) => {
     const shares = roomScreenShares.get(roomId);
     shares?.delete(socket.id);
+    clearAnnotationAccessForScreen(roomId, socket.id);
     socket.to(roomId).emit('peer-screen-share', {
       socketId: socket.id,
       sharing: false,
@@ -180,18 +225,89 @@ io.on('connection', (socket) => {
   // local sharer, but a client is untrusted, so we re-check here too.
   // No server-side shape history is kept: annotations are relayed live and
   // are not replayed for participants who join mid-share.
+  socket.on('annotation-request-access', ({ roomId, screenOwnerId }, callback) => {
+    const room = rooms.get(roomId);
+    const requester = room?.get(socket.id);
+    const owner = room?.get(screenOwnerId);
+    const shares = roomScreenShares.get(roomId);
+
+    if (!requester || !owner || !shares?.has(screenOwnerId) || screenOwnerId === socket.id) {
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    io.to(screenOwnerId).emit('annotation-access-requested', {
+      screenOwnerId,
+      requesterSocketId: socket.id,
+      requesterName: requester.name || 'Participant',
+    });
+
+    if (typeof callback === 'function') callback({ ok: true });
+  });
+
+  socket.on('annotation-access-response', ({ roomId, requesterSocketId, approved }, callback) => {
+    const room = rooms.get(roomId);
+    const shares = roomScreenShares.get(roomId);
+    const requester = room?.get(requesterSocketId);
+
+    if (!room?.has(socket.id) || !requester || !shares?.has(socket.id)) {
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    const granted = Boolean(approved);
+    const grantSet = getAnnotationGrantSet(roomId, socket.id);
+    if (granted) grantSet.add(requesterSocketId);
+    else grantSet.delete(requesterSocketId);
+
+    io.to(requesterSocketId).emit('annotation-access-updated', {
+      screenOwnerId: socket.id,
+      granted,
+    });
+    io.to(socket.id).emit('annotation-access-grant-updated', {
+      screenOwnerId: socket.id,
+      socketId: requesterSocketId,
+      name: requester.name || 'Participant',
+      granted,
+    });
+
+    if (typeof callback === 'function') callback({ ok: true });
+  });
+
+  socket.on('annotation-access-revoke', ({ roomId, screenOwnerId, targetSocketId }, callback) => {
+    const room = rooms.get(roomId);
+    const shares = roomScreenShares.get(roomId);
+    if (screenOwnerId !== socket.id || !room?.has(targetSocketId) || !shares?.has(socket.id)) {
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    getAnnotationGrantMap(roomId).get(screenOwnerId)?.delete(targetSocketId);
+    io.to(targetSocketId).emit('annotation-access-updated', {
+      screenOwnerId,
+      granted: false,
+    });
+    io.to(socket.id).emit('annotation-access-grant-updated', {
+      screenOwnerId,
+      socketId: targetSocketId,
+      granted: false,
+    });
+
+    if (typeof callback === 'function') callback({ ok: true });
+  });
+
   socket.on('annotation-draw', ({ roomId, screenOwnerId, shape }) => {
-    if (screenOwnerId !== socket.id) return;
+    if (!canAnnotate(roomId, screenOwnerId, socket.id)) return;
     socket.to(roomId).emit('annotation-draw', { screenOwnerId, shape });
   });
 
   socket.on('annotation-undo', ({ roomId, screenOwnerId, shapeId }) => {
-    if (screenOwnerId !== socket.id) return;
+    if (!canAnnotate(roomId, screenOwnerId, socket.id)) return;
     socket.to(roomId).emit('annotation-undo', { screenOwnerId, shapeId });
   });
 
   socket.on('annotation-clear', ({ roomId, screenOwnerId }) => {
-    if (screenOwnerId !== socket.id) return;
+    if (!canAnnotate(roomId, screenOwnerId, socket.id)) return;
     socket.to(roomId).emit('annotation-clear', { screenOwnerId });
   });
 
@@ -234,6 +350,8 @@ io.on('connection', (socket) => {
       target.leave(roomId);
       room?.delete(targetSocketId);
       roomScreenShares.get(roomId)?.delete(targetSocketId);
+      clearAnnotationAccessForScreen(roomId, targetSocketId);
+      revokeSocketAnnotationAccess(roomId, targetSocketId);
       io.to(roomId).emit('user-left', { socketId: targetSocketId });
     }
   });
@@ -249,8 +367,10 @@ io.on('connection', (socket) => {
       const shares = roomScreenShares.get(roomId);
       if (shares?.has(socket.id)) {
         shares.delete(socket.id);
+        clearAnnotationAccessForScreen(roomId, socket.id);
         socket.to(roomId).emit('peer-screen-share', { socketId: socket.id, sharing: false });
       }
+      revokeSocketAnnotationAccess(roomId, socket.id);
 
       const leaving = room.get(socket.id);
       room.delete(socket.id);
@@ -258,6 +378,7 @@ io.on('connection', (socket) => {
       if (room.size === 0) {
         rooms.delete(roomId);
         roomScreenShares.delete(roomId);
+        roomAnnotationGrants.delete(roomId);
       } else if (leaving?.isHost) {
         // Transfer host to next participant
         const [newHostId, newHostData] = room.entries().next().value;

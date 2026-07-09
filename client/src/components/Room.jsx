@@ -40,6 +40,10 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   // ── Annotation (screen-share drawing, sharer-only) ───────────────
   const [annotationTool, setAnnotationTool] = useState(null); // 'pen' | 'arrow' | 'rect' | 'circle' | null
   const [annotationColor, setAnnotationColor] = useState('#ef4444');
+  const [annotationAccessByScreen, setAnnotationAccessByScreen] = useState({});
+  const [annotationRequests, setAnnotationRequests] = useState({});
+  const [grantedAnnotators, setGrantedAnnotators] = useState({});
+  const [activeAnnotationScreenOwnerId, setActiveAnnotationScreenOwnerId] = useState('');
   const { shapesByScreen, addShape, undoLastShape, clearShapes, removeScreen } = useAnnotations({
     socket,
     roomId: localInfo.roomId,
@@ -258,6 +262,34 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         next.delete(socketId);
         return next;
       });
+      setAnnotationAccessByScreen((prev) => {
+        const next = { ...prev };
+        delete next[socketId];
+        return next;
+      });
+      setAnnotationRequests((prev) => {
+        const next = { ...prev };
+        delete next[socketId];
+        Object.keys(next).forEach((screenOwnerId) => {
+          if (next[screenOwnerId]?.[socketId]) {
+            next[screenOwnerId] = { ...next[screenOwnerId] };
+            delete next[screenOwnerId][socketId];
+          }
+        });
+        return next;
+      });
+      setGrantedAnnotators((prev) => {
+        const next = { ...prev };
+        delete next[socketId];
+        Object.keys(next).forEach((screenOwnerId) => {
+          if (next[screenOwnerId]?.[socketId]) {
+            next[screenOwnerId] = { ...next[screenOwnerId] };
+            delete next[screenOwnerId][socketId];
+          }
+        });
+        return next;
+      });
+      setActiveAnnotationScreenOwnerId((prev) => (prev === socketId ? '' : prev));
       removeScreenRef.current(socketId);
     };
 
@@ -300,7 +332,72 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           delete next[socketId];
           return next;
         });
+        setAnnotationAccessByScreen((prev) => {
+          const next = { ...prev };
+          delete next[socketId];
+          return next;
+        });
+        setAnnotationRequests((prev) => {
+          const next = { ...prev };
+          delete next[socketId];
+          return next;
+        });
+        setGrantedAnnotators((prev) => {
+          const next = { ...prev };
+          delete next[socketId];
+          return next;
+        });
+        setActiveAnnotationScreenOwnerId((prev) => (prev === socketId ? '' : prev));
       }
+    };
+
+    const onAnnotationAccessRequested = ({ screenOwnerId, requesterSocketId, requesterName }) => {
+      if (screenOwnerId !== localSocketIdRef.current) return;
+      setAnnotationRequests((prev) => ({
+        ...prev,
+        [screenOwnerId]: {
+          ...(prev[screenOwnerId] || {}),
+          [requesterSocketId]: {
+            socketId: requesterSocketId,
+            name: requesterName || 'Participant',
+          },
+        },
+      }));
+    };
+
+    const onAnnotationAccessUpdated = ({ screenOwnerId, granted }) => {
+      setAnnotationAccessByScreen((prev) => ({
+        ...prev,
+        [screenOwnerId]: granted ? 'granted' : 'none',
+      }));
+      if (granted) {
+        setActiveAnnotationScreenOwnerId(screenOwnerId);
+      } else {
+        setActiveAnnotationScreenOwnerId((prev) => (prev === screenOwnerId ? '' : prev));
+        setAnnotationTool(null);
+      }
+    };
+
+    const onAnnotationAccessGrantUpdated = ({ screenOwnerId, socketId, name, granted }) => {
+      setAnnotationRequests((prev) => {
+        const nextForScreen = { ...(prev[screenOwnerId] || {}) };
+        delete nextForScreen[socketId];
+        return { ...prev, [screenOwnerId]: nextForScreen };
+      });
+      setGrantedAnnotators((prev) => {
+        const nextForScreen = { ...(prev[screenOwnerId] || {}) };
+        if (granted) nextForScreen[socketId] = { socketId, name: name || 'Participant' };
+        else delete nextForScreen[socketId];
+        return { ...prev, [screenOwnerId]: nextForScreen };
+      });
+    };
+
+    const onAnnotationAccessRevoked = ({ screenOwnerId, socketId }) => {
+      setGrantedAnnotators((prev) => {
+        const nextForScreen = { ...(prev[screenOwnerId] || {}) };
+        delete nextForScreen[socketId];
+        return { ...prev, [screenOwnerId]: nextForScreen };
+      });
     };
 
     const onChatMessage = (msg) => {
@@ -355,6 +452,10 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     socket.on('peer-media-state', onPeerMediaState);
     socket.on('peer-hand-state', onPeerHandState);
     socket.on('peer-screen-share', onPeerScreenShare);
+    socket.on('annotation-access-requested', onAnnotationAccessRequested);
+    socket.on('annotation-access-updated', onAnnotationAccessUpdated);
+    socket.on('annotation-access-grant-updated', onAnnotationAccessGrantUpdated);
+    socket.on('annotation-access-revoked', onAnnotationAccessRevoked);
     socket.on('chat-message', onChatMessage);
     socket.on('host-mute-all', onHostMuteAll);
     socket.on('host-mute-user', onHostMuteUser);
@@ -381,6 +482,10 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       socket.off('peer-media-state', onPeerMediaState);
       socket.off('peer-hand-state', onPeerHandState);
       socket.off('peer-screen-share', onPeerScreenShare);
+      socket.off('annotation-access-requested', onAnnotationAccessRequested);
+      socket.off('annotation-access-updated', onAnnotationAccessUpdated);
+      socket.off('annotation-access-grant-updated', onAnnotationAccessGrantUpdated);
+      socket.off('annotation-access-revoked', onAnnotationAccessRevoked);
       socket.off('chat-message', onChatMessage);
       socket.off('host-mute-all', onHostMuteAll);
       socket.off('host-mute-user', onHostMuteUser);
@@ -505,6 +610,19 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     // otherwise re-sharing later would resurrect stale shapes/tool state.
     removeScreenRef.current(localSocketIdRef.current);
     setAnnotationTool(null);
+    setAnnotationRequests((prev) => {
+      const next = { ...prev };
+      delete next[localSocketIdRef.current];
+      return next;
+    });
+    setGrantedAnnotators((prev) => {
+      const next = { ...prev };
+      delete next[localSocketIdRef.current];
+      return next;
+    });
+    setActiveAnnotationScreenOwnerId((prev) =>
+      prev === localSocketIdRef.current ? '' : prev
+    );
 
     // If we were the pinned/primary share, clear the pin so the layout
     // falls back to whatever is left (single share, split, or grid).
@@ -600,6 +718,35 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     [socket, localInfo]
   );
 
+  const handleRequestAnnotationAccess = useCallback((screenOwnerId) => {
+    setAnnotationAccessByScreen((prev) => ({ ...prev, [screenOwnerId]: 'pending' }));
+    socket.emit('annotation-request-access', {
+      roomId: localInfo.roomId,
+      screenOwnerId,
+    }, (res) => {
+      if (!res?.ok) {
+        setAnnotationAccessByScreen((prev) => ({ ...prev, [screenOwnerId]: 'none' }));
+        alert('Could not request drawing access for this screen share.');
+      }
+    });
+  }, [socket, localInfo]);
+
+  const handleAnnotationAccessResponse = useCallback((requesterSocketId, approved) => {
+    socket.emit('annotation-access-response', {
+      roomId: localInfo.roomId,
+      requesterSocketId,
+      approved,
+    });
+  }, [socket, localInfo]);
+
+  const handleRevokeAnnotationAccess = useCallback((targetSocketId) => {
+    socket.emit('annotation-access-revoke', {
+      roomId: localInfo.roomId,
+      screenOwnerId: localSocketIdRef.current,
+      targetSocketId,
+    });
+  }, [socket, localInfo]);
+
   const handleCopyRoomId = useCallback(async () => {
     try {
       await navigator.clipboard?.writeText(localInfo.roomId);
@@ -638,17 +785,45 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   };
 
   // ── Annotation handlers (sharer-only — see AnnotationToolbar) ────
+  const getParticipantName = useCallback((socketId) => {
+    if (socketId === localSocketId) return localInfo.name;
+    return remoteParticipants[socketId]?.name || 'Participant';
+  }, [localSocketId, localInfo, remoteParticipants]);
+
+  const drawableAnnotationTargets = [
+    ...(isScreenSharing
+      ? [{ id: localSocketId, label: `${localInfo.name} screen` }]
+      : []),
+    ...Object.keys(remoteScreenShares)
+      .filter((id) => annotationAccessByScreen[id] === 'granted')
+      .map((id) => ({ id, label: `${getParticipantName(id)} screen` })),
+  ].filter((target) => target.id);
+
+  const effectiveActiveAnnotationScreenOwnerId = drawableAnnotationTargets.some(
+    (target) => target.id === activeAnnotationScreenOwnerId
+  )
+    ? activeAnnotationScreenOwnerId
+    : drawableAnnotationTargets[0]?.id || '';
+
   const handleAnnotationAddShape = useCallback(
-    (shape) => addShape(localSocketId, shape),
-    [addShape, localSocketId]
+    (screenOwnerId, shape) => addShape(screenOwnerId, shape),
+    [addShape]
   );
   const handleAnnotationUndo = useCallback(
-    () => undoLastShape(localSocketId),
-    [undoLastShape, localSocketId]
+    () => {
+      if (effectiveActiveAnnotationScreenOwnerId) {
+        undoLastShape(effectiveActiveAnnotationScreenOwnerId);
+      }
+    },
+    [undoLastShape, effectiveActiveAnnotationScreenOwnerId]
   );
   const handleAnnotationClear = useCallback(
-    () => clearShapes(localSocketId),
-    [clearShapes, localSocketId]
+    () => {
+      if (effectiveActiveAnnotationScreenOwnerId) {
+        clearShapes(effectiveActiveAnnotationScreenOwnerId);
+      }
+    },
+    [clearShapes, effectiveActiveAnnotationScreenOwnerId]
   );
 
   // Build participant list (camera tiles only — screen shares are separate)
@@ -687,26 +862,52 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           annotation: {
             shapes: shapesByScreen[localSocketId] || [],
             isOwner: true,
-            tool: annotationTool,
+            tool: effectiveActiveAnnotationScreenOwnerId === localSocketId ? annotationTool : null,
             color: annotationColor,
-            onAddShape: handleAnnotationAddShape,
+            onAddShape: (shape) => handleAnnotationAddShape(localSocketId, shape),
           },
         }]
       : []),
-    ...Object.entries(remoteScreenShares).map(([id, stream]) => ({
-      socketId: `${id}-screen`,
-      stream,
-      name: remoteParticipants[id]?.name || 'Participant',
-      isLocal: false,
-      isScreenShare: true,
-      annotation: {
-        shapes: shapesByScreen[id] || [],
-        isOwner: false,
-        tool: null,
-        color: null,
-        onAddShape: () => {},
-      },
-    })),
+    ...Object.entries(remoteScreenShares).map(([id, stream]) => {
+      const accessStatus = annotationAccessByScreen[id] || 'none';
+      const canAnnotateScreen = accessStatus === 'granted';
+      return {
+        socketId: `${id}-screen`,
+        stream,
+        name: remoteParticipants[id]?.name || 'Participant',
+        isLocal: false,
+        isScreenShare: true,
+        annotation: {
+          shapes: shapesByScreen[id] || [],
+          isOwner: canAnnotateScreen,
+          tool: canAnnotateScreen && effectiveActiveAnnotationScreenOwnerId === id ? annotationTool : null,
+          color: annotationColor,
+          onAddShape: (shape) => handleAnnotationAddShape(id, shape),
+        },
+        annotationAccess: {
+          visible: true,
+          status: accessStatus,
+          disabled: accessStatus === 'pending',
+          label:
+            accessStatus === 'granted'
+              ? effectiveActiveAnnotationScreenOwnerId === id ? 'Drawing' : 'Draw'
+              : accessStatus === 'pending'
+              ? 'Requested'
+              : 'Request draw',
+          title:
+            accessStatus === 'granted'
+              ? 'Select this screen as your annotation target'
+              : 'Ask the presenter for permission to draw on this screen',
+          onClick: () => {
+            if (accessStatus === 'granted') {
+              setActiveAnnotationScreenOwnerId(id);
+            } else if (accessStatus !== 'pending') {
+              handleRequestAnnotationAccess(id);
+            }
+          },
+        },
+      };
+    }),
   ];
 
   const count = allParticipants.length;
@@ -740,6 +941,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
   // Whether the local user is still allowed to start a new share
   const canShareScreen = isScreenSharing || activeSharerIds.size < MAX_SCREEN_SHARES;
+  const pendingAnnotationRequests = Object.values(annotationRequests[localSocketId] || {});
+  const activeGrantedAnnotators = Object.values(grantedAnnotators[localSocketId] || {});
 
   // ── Room Full overlay ────────────────────────────────────────────
   if (roomFullError) {
@@ -821,7 +1024,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
               {/* Sharer-only drawing toolbar — only relevant while the local
                   user is presenting, so it's mounted here rather than inside
                   a specific tile (which may move between main/sidebar). */}
-              {isScreenSharing && (
+              {drawableAnnotationTargets.length > 0 && (
                 <AnnotationToolbar
                   tool={annotationTool}
                   onSelectTool={setAnnotationTool}
@@ -829,7 +1032,33 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
                   onSelectColor={setAnnotationColor}
                   onUndo={handleAnnotationUndo}
                   onClear={handleAnnotationClear}
+                  targets={drawableAnnotationTargets}
+                  activeTargetId={effectiveActiveAnnotationScreenOwnerId}
+                  onSelectTarget={setActiveAnnotationScreenOwnerId}
                 />
+              )}
+              {isScreenSharing && (pendingAnnotationRequests.length > 0 || activeGrantedAnnotators.length > 0) && (
+                <div className="annotation-access-panel">
+                  {pendingAnnotationRequests.map((request) => (
+                    <div key={request.socketId} className="annotation-access-row">
+                      <span>{request.name} wants to draw</span>
+                      <button type="button" onClick={() => handleAnnotationAccessResponse(request.socketId, true)}>
+                        Allow
+                      </button>
+                      <button type="button" className="danger" onClick={() => handleAnnotationAccessResponse(request.socketId, false)}>
+                        Deny
+                      </button>
+                    </div>
+                  ))}
+                  {activeGrantedAnnotators.map((drawer) => (
+                    <div key={drawer.socketId} className="annotation-access-row granted">
+                      <span>{drawer.name} can draw</span>
+                      <button type="button" className="danger" onClick={() => handleRevokeAnnotationAccess(drawer.socketId)}>
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
               {mainScreenTiles.map((p) => (
                 <VideoTile
@@ -842,6 +1071,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
                   showPrimaryButton={mainScreenTiles.length > 1}
                   onSetPrimary={() => setPinnedScreenId(p.socketId)}
                   annotation={p.annotation}
+                  annotationAccess={p.annotationAccess}
                 />
               ))}
               {validPinnedScreenId && screenTiles.length === 2 && (
@@ -867,6 +1097,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
                   showPrimaryButton
                   onSetPrimary={() => setPinnedScreenId(p.socketId)}
                   annotation={p.annotation}
+                  annotationAccess={p.annotationAccess}
                 />
               ))}
               {allParticipants.map((p) => (

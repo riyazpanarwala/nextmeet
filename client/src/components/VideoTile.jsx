@@ -10,7 +10,8 @@ export function VideoTile({
   onSetPrimary,       // called when the user wants this tile to become the main view
   showPrimaryButton,  // show the "Set as Main" control (only relevant for screen shares)
   isPrimary,          // this tile IS the current main view — shows a "Presenting" badge
-  annotation,         // optional: { shapes, isOwner, tool, color, onAddShape } — screen shares only
+  annotation,
+  annotationAccess,
 }) {
   const videoRef = useRef(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -72,6 +73,21 @@ export function VideoTile({
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
           </svg>
           Set as Main
+        </button>
+      )}
+
+      {isScreenShare && annotationAccess?.visible && (
+        <button
+          type="button"
+          className={`tile-annotate-btn ${annotationAccess.status === 'granted' ? 'granted' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            annotationAccess.onClick?.();
+          }}
+          disabled={annotationAccess.disabled}
+          title={annotationAccess.title}
+        >
+          {annotationAccess.label}
         </button>
       )}
 

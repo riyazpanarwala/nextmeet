@@ -50,6 +50,19 @@
   margin: 0 2px;
 }
 
+.annot-target-select {
+  height: 30px;
+  max-width: 150px;
+  border: 1px solid var(--border-hi);
+  border-radius: 16px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 8px;
+  outline: none;
+}
+
 .annot-colors {
   display: flex;
   gap: 5px;
@@ -76,4 +89,5 @@
     -webkit-overflow-scrolling: touch;
   }
   .annot-btn { min-width: 30px; height: 28px; padding: 0 8px; font-size: 11px; }
+  .annot-target-select { max-width: 120px; height: 28px; font-size: 11px; }
 }
