@@ -4,6 +4,7 @@ import { useMediaDevices } from './hooks/useMediaDevices';
 import { Lobby } from './components/Lobby';
 import { Room } from './components/Room';
 import './App.css';
+import './annotations.css';
 
 const PHASE = { LOBBY: 'lobby', CONNECTING: 'connecting', ROOM: 'room', ERROR: 'error' };
 

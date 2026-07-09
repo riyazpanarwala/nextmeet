@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePeerConnections } from '../hooks/usePeerConnections';
 import { useRecording } from '../hooks/useRecording';
+import { useAnnotations } from '../hooks/useAnnotations';
 import { VideoTile } from './VideoTile';
 import { Controls } from './Controls';
 import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { RecordingPanel } from './RecordingPanel';
+import { AnnotationToolbar } from './AnnotationToolbar';
 
 const MAX_SCREEN_SHARES = 2;
 
@@ -34,6 +36,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const [localSocketId, setLocalSocketId] = useState('');
   const [roomFullError, setRoomFullError] = useState(false);
   const [localHandRaised, setLocalHandRaised] = useState(false);
+
+  // ── Annotation (screen-share drawing, sharer-only) ───────────────
+  const [annotationTool, setAnnotationTool] = useState(null); // 'pen' | 'arrow' | 'rect' | 'circle' | null
+  const [annotationColor, setAnnotationColor] = useState('#ef4444');
+  const { shapesByScreen, addShape, undoLastShape, clearShapes, removeScreen } = useAnnotations({
+    socket,
+    roomId: localInfo.roomId,
+  });
 
   // Stable refs so socket handlers don't re-register on every render
   const isMutedRef = useRef(isMuted);
@@ -131,6 +141,10 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   useEffect(() => { closeOutgoingScreenPeerRef.current = closeOutgoingScreenPeer; }, [closeOutgoingScreenPeer]);
   useEffect(() => { closeIncomingScreenPeerRef.current = closeIncomingScreenPeer; }, [closeIncomingScreenPeer]);
   useEffect(() => { closeScreenPeerRef.current = closeScreenPeer; }, [closeScreenPeer]);
+
+  // Stable ref for annotation cleanup (avoid stale closures in socket handlers)
+  const removeScreenRef = useRef(removeScreen);
+  useEffect(() => { removeScreenRef.current = removeScreen; }, [removeScreen]);
 
   // ── Register socket listeners ONCE, then emit join-room ─────────
   useEffect(() => {
@@ -244,6 +258,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         next.delete(socketId);
         return next;
       });
+      removeScreenRef.current(socketId);
     };
 
     const onPeerMediaState = ({ socketId, isMuted: m, isVideoOff: v }) => {
@@ -272,6 +287,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         else next.delete(socketId);
         return next;
       });
+
+      // Fresh share (or a share ending) both start from a clean slate —
+      // any leftover annotations from a previous share by this socketId
+      // shouldn't bleed into the next one.
+      removeScreenRef.current(socketId);
 
       if (!sharing) {
         closeIncomingScreenPeerRef.current(socketId);
@@ -481,6 +501,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       return next;
     });
 
+    // Drop our own annotations and reset the toolbar for next time —
+    // otherwise re-sharing later would resurrect stale shapes/tool state.
+    removeScreenRef.current(localSocketIdRef.current);
+    setAnnotationTool(null);
+
     // If we were the pinned/primary share, clear the pin so the layout
     // falls back to whatever is left (single share, split, or grid).
     setPinnedScreenId((prev) =>
@@ -612,6 +637,20 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     if (showParticipants) setShowParticipants(false);
   };
 
+  // ── Annotation handlers (sharer-only — see AnnotationToolbar) ────
+  const handleAnnotationAddShape = useCallback(
+    (shape) => addShape(localSocketId, shape),
+    [addShape, localSocketId]
+  );
+  const handleAnnotationUndo = useCallback(
+    () => undoLastShape(localSocketId),
+    [undoLastShape, localSocketId]
+  );
+  const handleAnnotationClear = useCallback(
+    () => clearShapes(localSocketId),
+    [clearShapes, localSocketId]
+  );
+
   // Build participant list (camera tiles only — screen shares are separate)
   const allParticipants = [
     {
@@ -635,6 +674,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
   // Build screen-share tile list (local + remote), rendered separately
   // and full-width via the existing .video-tile.screen-share CSS class.
+  // Each tile carries an `annotation` payload so VideoTile can render the
+  // overlay — only the local sharer's own tile gets `isOwner: true`.
   const screenTiles = [
     ...(isScreenSharing
       ? [{
@@ -643,6 +684,13 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           name: localInfo.name,
           isLocal: true,
           isScreenShare: true,
+          annotation: {
+            shapes: shapesByScreen[localSocketId] || [],
+            isOwner: true,
+            tool: annotationTool,
+            color: annotationColor,
+            onAddShape: handleAnnotationAddShape,
+          },
         }]
       : []),
     ...Object.entries(remoteScreenShares).map(([id, stream]) => ({
@@ -651,6 +699,13 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       name: remoteParticipants[id]?.name || 'Participant',
       isLocal: false,
       isScreenShare: true,
+      annotation: {
+        shapes: shapesByScreen[id] || [],
+        isOwner: false,
+        tool: null,
+        color: null,
+        onAddShape: () => {},
+      },
     })),
   ];
 
@@ -763,6 +818,19 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           <div className="presentation-layout">
             {/* Main area — the primary screen share (or both, split, if unpinned) */}
             <div className={`presentation-main ${mainScreenTiles.length > 1 ? 'split' : ''}`}>
+              {/* Sharer-only drawing toolbar — only relevant while the local
+                  user is presenting, so it's mounted here rather than inside
+                  a specific tile (which may move between main/sidebar). */}
+              {isScreenSharing && (
+                <AnnotationToolbar
+                  tool={annotationTool}
+                  onSelectTool={setAnnotationTool}
+                  color={annotationColor}
+                  onSelectColor={setAnnotationColor}
+                  onUndo={handleAnnotationUndo}
+                  onClear={handleAnnotationClear}
+                />
+              )}
               {mainScreenTiles.map((p) => (
                 <VideoTile
                   key={p.socketId}
@@ -773,6 +841,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
                   isPrimary={mainScreenTiles.length === 1}
                   showPrimaryButton={mainScreenTiles.length > 1}
                   onSetPrimary={() => setPinnedScreenId(p.socketId)}
+                  annotation={p.annotation}
                 />
               ))}
               {validPinnedScreenId && screenTiles.length === 2 && (
@@ -797,6 +866,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
                   isScreenShare
                   showPrimaryButton
                   onSetPrimary={() => setPinnedScreenId(p.socketId)}
+                  annotation={p.annotation}
                 />
               ))}
               {allParticipants.map((p) => (

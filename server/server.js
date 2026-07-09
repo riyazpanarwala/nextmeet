@@ -173,6 +173,28 @@ io.on('connection', (socket) => {
     console.log(`[-] ${socket.id} stopped screen share in ${roomId}`);
   });
 
+  // ─── SCREEN ANNOTATION (sharer-only) ──────────────────────────
+  // `screenOwnerId` must equal the emitting socket's own id — this is the
+  // server-side enforcement of "only the person sharing their screen can
+  // draw on it." The client already only mounts drawing controls for the
+  // local sharer, but a client is untrusted, so we re-check here too.
+  // No server-side shape history is kept: annotations are relayed live and
+  // are not replayed for participants who join mid-share.
+  socket.on('annotation-draw', ({ roomId, screenOwnerId, shape }) => {
+    if (screenOwnerId !== socket.id) return;
+    socket.to(roomId).emit('annotation-draw', { screenOwnerId, shape });
+  });
+
+  socket.on('annotation-undo', ({ roomId, screenOwnerId, shapeId }) => {
+    if (screenOwnerId !== socket.id) return;
+    socket.to(roomId).emit('annotation-undo', { screenOwnerId, shapeId });
+  });
+
+  socket.on('annotation-clear', ({ roomId, screenOwnerId }) => {
+    if (screenOwnerId !== socket.id) return;
+    socket.to(roomId).emit('annotation-clear', { screenOwnerId });
+  });
+
   // ─── CHAT ────────────────────────────────────────────────────
   socket.on('chat-message', ({ roomId, message }) => {
     const room = rooms.get(roomId);

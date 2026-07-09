@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAudioLevel } from '../hooks/useAudioLevel';
+import { AnnotationOverlay } from './AnnotationOverlay';
 
 export function VideoTile({
   stream,
@@ -9,6 +10,7 @@ export function VideoTile({
   onSetPrimary,       // called when the user wants this tile to become the main view
   showPrimaryButton,  // show the "Set as Main" control (only relevant for screen shares)
   isPrimary,          // this tile IS the current main view — shows a "Presenting" badge
+  annotation,         // optional: { shapes, isOwner, tool, color, onAddShape } — screen shares only
 }) {
   const videoRef = useRef(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -81,6 +83,20 @@ export function VideoTile({
         muted={isLocal}
         style={{ opacity: participant?.isVideoOff && !isScreenShare ? 0 : 1 }}
       />
+
+      {/* Annotation overlay — screen shares only. Renders shapes for every
+          viewer; only intercepts pointer events for the sharer with a tool
+          selected (enforced inside AnnotationOverlay via `isOwner`/`tool`). */}
+      {isScreenShare && annotation && (
+        <AnnotationOverlay
+          videoRef={videoRef}
+          shapes={annotation.shapes}
+          isOwner={annotation.isOwner}
+          tool={annotation.tool}
+          color={annotation.color}
+          onAddShape={annotation.onAddShape}
+        />
+      )}
 
       {/* Avatar fallback when video is off */}
       {participant?.isVideoOff && !isScreenShare && (
