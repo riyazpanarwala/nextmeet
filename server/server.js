@@ -30,6 +30,9 @@ const MAX_SCREEN_SHARES = 2;
 // roomId -> Map<screenOwnerId, Set<grantedSocketId>>
 const roomAnnotationGrants = new Map();
 
+// roomId -> { open: boolean, shapes: Shape[] }
+const roomWhiteboards = new Map();
+
 function getRoomParticipants(roomId) {
   const room = rooms.get(roomId);
   if (!room) return [];
@@ -57,7 +60,13 @@ function cleanupEmptyRoom(roomId) {
   roomScreenShares.delete(roomId);
   roomAnnotationGrants.delete(roomId);
   roomSecurity.delete(roomId);
+  roomWhiteboards.delete(roomId);
   return true;
+}
+
+function getRoomWhiteboard(roomId) {
+  if (!roomWhiteboards.has(roomId)) roomWhiteboards.set(roomId, { open: false, shapes: [] });
+  return roomWhiteboards.get(roomId);
 }
 
 function getAnnotationGrantMap(roomId) {
@@ -165,6 +174,7 @@ io.on('connection', (socket) => {
       screenSharingSocketIds,
       roomLocked: security.locked,
       passwordProtected: Boolean(security.password),
+      whiteboard: getRoomWhiteboard(roomId),
     });
 
     // Notify everyone else about the new user
@@ -364,6 +374,39 @@ io.on('connection', (socket) => {
   socket.on('annotation-clear', ({ roomId, screenOwnerId }) => {
     if (!canAnnotate(roomId, screenOwnerId, socket.id)) return;
     socket.to(roomId).emit('annotation-clear', { screenOwnerId });
+  });
+
+  // ─── WHITEBOARD ──────────────────────────────────────────────
+  socket.on('whiteboard-open-set', ({ roomId, open }) => {
+    const room = rooms.get(roomId);
+    if (!room?.has(socket.id)) return;
+    const whiteboard = getRoomWhiteboard(roomId);
+    whiteboard.open = Boolean(open);
+    io.to(roomId).emit('whiteboard-open-updated', { open: whiteboard.open });
+  });
+
+  socket.on('whiteboard-draw', ({ roomId, shape }) => {
+    const room = rooms.get(roomId);
+    if (!room?.has(socket.id) || !shape?.id) return;
+    const whiteboard = getRoomWhiteboard(roomId);
+    whiteboard.shapes.push(shape);
+    socket.to(roomId).emit('whiteboard-draw', { shape });
+  });
+
+  socket.on('whiteboard-undo', ({ roomId, shapeId }) => {
+    const room = rooms.get(roomId);
+    if (!room?.has(socket.id)) return;
+    const whiteboard = getRoomWhiteboard(roomId);
+    whiteboard.shapes = whiteboard.shapes.filter((shape) => shape.id !== shapeId);
+    socket.to(roomId).emit('whiteboard-undo', { shapeId });
+  });
+
+  socket.on('whiteboard-clear', ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room?.has(socket.id)) return;
+    const whiteboard = getRoomWhiteboard(roomId);
+    whiteboard.shapes = [];
+    socket.to(roomId).emit('whiteboard-clear');
   });
 
   // ─── CHAT ────────────────────────────────────────────────────

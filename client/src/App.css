@@ -571,6 +571,67 @@ select option { background: var(--surface2); }
   flex-shrink: 0;
 }
 
+.whiteboard-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+  background: #0b1220;
+}
+.whiteboard-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
+}
+.whiteboard-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 16px;
+}
+.whiteboard-header span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.whiteboard-toolbar-wrap {
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.whiteboard-toolbar-wrap .annotation-toolbar {
+  width: max-content;
+  max-width: 100%;
+}
+.whiteboard-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255,255,255,0.12);
+  background:
+    linear-gradient(rgba(15,23,42,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15,23,42,0.04) 1px, transparent 1px),
+    #f8fafc;
+  background-size: 28px 28px;
+  overflow: hidden;
+  touch-action: none;
+  cursor: default;
+  box-shadow: inset 0 0 0 1px rgba(15,23,42,0.08), 0 20px 50px rgba(0,0,0,0.22);
+}
+.whiteboard-canvas.drawing {
+  cursor: crosshair;
+}
+.whiteboard-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* "Set as Main" pin button — appears on hover over a non-primary tile */
 .tile-pin-btn {
   position: absolute;
@@ -2126,7 +2187,8 @@ select option { background: var(--surface2); }
 .settings-quick-btn.mirror-hand,
 .settings-quick-btn.mirror-rec,
 .settings-quick-btn.mirror-chat,
-.settings-quick-btn.mirror-people {
+.settings-quick-btn.mirror-people,
+.settings-quick-btn.mirror-board {
   display: none;
 }
 
@@ -2143,7 +2205,8 @@ select option { background: var(--surface2); }
   .settings-quick-btn.mirror-hand,
   .settings-quick-btn.mirror-rec,
   .settings-quick-btn.mirror-chat,
-  .settings-quick-btn.mirror-people {
+  .settings-quick-btn.mirror-people,
+  .settings-quick-btn.mirror-board {
     display: flex;
   }
 }

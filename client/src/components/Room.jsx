@@ -3,12 +3,14 @@ import { usePeerConnections } from '../hooks/usePeerConnections';
 import { useRecording } from '../hooks/useRecording';
 import { useAnnotations } from '../hooks/useAnnotations';
 import { useConnectionQuality } from '../hooks/useConnectionQuality';
+import { useWhiteboard } from '../hooks/useWhiteboard';
 import { VideoTile } from './VideoTile';
 import { Controls } from './Controls';
 import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { RecordingPanel } from './RecordingPanel';
 import { AnnotationToolbar } from './AnnotationToolbar';
+import { WhiteboardPanel } from './WhiteboardPanel';
 import { downloadAnnotationPdf, downloadAnnotationPng } from '../utils/annotationExport';
 
 const MAX_SCREEN_SHARES = 2;
@@ -33,6 +35,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const [showChat, setShowChat] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const [showRecording, setShowRecording] = useState(false);
+  const [whiteboardTool, setWhiteboardTool] = useState('pen');
+  const [whiteboardColor, setWhiteboardColor] = useState('#3b82f6');
   const [pinnedScreenId, setPinnedScreenId] = useState(null); // user-selected "main" screen share
   const [isHost, setIsHost] = useState(false);
   const [localSocketId, setLocalSocketId] = useState('');
@@ -58,6 +62,10 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const [grantedAnnotators, setGrantedAnnotators] = useState({});
   const [activeAnnotationScreenOwnerId, setActiveAnnotationScreenOwnerId] = useState('');
   const { shapesByScreen, addShape, undoLastShape, clearShapes, removeScreen } = useAnnotations({
+    socket,
+    roomId: localInfo.roomId,
+  });
+  const whiteboard = useWhiteboard({
     socket,
     roomId: localInfo.roomId,
   });
@@ -200,13 +208,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   useEffect(() => {
     if (!socket) return;
 
-    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked }) => {
+    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked, whiteboard: initialWhiteboard }) => {
       console.log('[Room] room-joined', socketId, 'host:', amHost, 'peers:', participants.length);
       setLocalSocketId(socketId);
       localSocketIdRef.current = socketId;
       setIsHost(amHost);
       isHostRef.current = amHost;
       setRoomLocked(Boolean(locked));
+      whiteboard.setInitialWhiteboard(initialWhiteboard);
 
       if (participants.length > 0) {
         setRemoteParticipants((prev) => {
@@ -895,6 +904,16 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     if (showParticipants) setShowParticipants(false);
   };
 
+  const handleToggleWhiteboard = useCallback(() => {
+    const nextOpen = !whiteboard.isOpen;
+    whiteboard.setOpen(nextOpen);
+    if (nextOpen) {
+      setShowChat(false);
+      setShowParticipants(false);
+      setShowRecording(false);
+    }
+  }, [whiteboard]);
+
   useEffect(() => {
     const onKeyDown = (event) => {
       const target = event.target;
@@ -923,10 +942,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       } else if (key === 'r') {
         event.preventDefault();
         handleToggleRecording();
+      } else if (key === 'w') {
+        event.preventDefault();
+        handleToggleWhiteboard();
       } else if (event.key === 'Escape') {
         setShowChat(false);
         setShowParticipants(false);
         setShowRecording(false);
+        if (whiteboard.isOpen) whiteboard.setOpen(false);
       }
     };
 
@@ -939,6 +962,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     handleToggleVideo,
     handleToggleHand,
     handleToggleScreen,
+    handleToggleWhiteboard,
+    whiteboard,
   ]);
 
   // ── Annotation handlers (sharer-only — see AnnotationToolbar) ────
@@ -1280,7 +1305,20 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       )}
 
       <div className="room-body">
-        {hasScreenShare ? (
+        {whiteboard.isOpen ? (
+          <WhiteboardPanel
+            roomId={localInfo.roomId}
+            shapes={whiteboard.shapes}
+            tool={whiteboardTool}
+            color={whiteboardColor}
+            onSelectTool={setWhiteboardTool}
+            onSelectColor={setWhiteboardColor}
+            onAddShape={whiteboard.addShape}
+            onUndo={whiteboard.undoLastShape}
+            onClear={whiteboard.clearShapes}
+            onClose={() => whiteboard.setOpen(false)}
+          />
+        ) : hasScreenShare ? (
           <div className="presentation-layout">
             {/* Main area — the primary screen share (or both, split, if unpinned) */}
             <div className={`presentation-main ${mainScreenTiles.length > 1 ? 'split' : ''}`}>
@@ -1381,7 +1419,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           </div>
         )}
 
-        {pipParticipant && (
+        {!whiteboard.isOpen && pipParticipant && (
           <div className="pip-window">
             <VideoTile
               stream={pipParticipant.stream}
@@ -1457,6 +1495,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         onToggleMute={handleToggleMute}
         onToggleVideo={handleToggleVideo}
         onToggleHand={handleToggleHand}
+        onToggleWhiteboard={handleToggleWhiteboard}
         onToggleScreen={handleToggleScreen}
         onLeave={doLeave}
         onToggleChat={handleToggleChat}
@@ -1465,6 +1504,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         showChat={showChat}
         showParticipants={showParticipants}
         showRecording={showRecording}
+        showWhiteboard={whiteboard.isOpen}
         unreadCount={unreadCount}
         isHost={isHost}
         onMuteAll={handleMuteAll}

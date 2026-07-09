@@ -75,6 +75,16 @@ const SettingsIcon = () => (
   </svg>
 );
 
+const WhiteboardIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="14" rx="2" />
+    <path d="M8 21h8" />
+    <path d="M12 18v3" />
+    <path d="M8 9h8" />
+    <path d="M8 13h5" />
+  </svg>
+);
+
 const LockIcon = ({ locked }) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="4" y="10" width="16" height="10" rx="2" />
@@ -108,8 +118,9 @@ export function Controls({
   canShareScreen, // false when the max concurrent screen-share limit is reached
   onToggleMute, onToggleVideo, onToggleScreen,
   onToggleHand,
+  onToggleWhiteboard,
   onLeave, onToggleChat, onToggleParticipants, onToggleRecording,
-  showChat, showParticipants, showRecording, unreadCount,
+  showChat, showParticipants, showRecording, showWhiteboard, unreadCount,
   isHost, onMuteAll,
   roomLocked = false, onToggleRoomLock,
   joinLeaveSoundsEnabled = true, onToggleJoinLeaveSounds,
@@ -262,6 +273,11 @@ export function Controls({
             <span className="mobile-label">People</span>
           </button>
 
+          <button className={`ctrl-btn mobile-overflow-action ${showWhiteboard ? 'active' : ''}`} onClick={onToggleWhiteboard} title="Whiteboard">
+            <WhiteboardIcon />
+            <span className="mobile-label">Board</span>
+          </button>
+
           {/* More — only meaningful once some of the bar buttons above collapse
             out of view (tablet/mobile). Hidden entirely on desktop via CSS
             (.more-btn), since every action it holds is already visible in
@@ -359,6 +375,18 @@ export function Controls({
             >
               <ParticipantsIcon />
               <span>People</span>
+            </button>
+
+            <button
+              type="button"
+              className={`settings-quick-btn mirror-board ${showWhiteboard ? 'active' : ''}`}
+              onClick={() => {
+                onToggleWhiteboard();
+                closeMore();
+              }}
+            >
+              <WhiteboardIcon />
+              <span>Whiteboard</span>
             </button>
 
             {/* Mute All is a fire-and-forget action, not a panel — no need to close More */}
