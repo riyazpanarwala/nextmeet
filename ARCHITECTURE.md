@@ -1,6 +1,6 @@
 # NexMeet Architecture
 
-This document describes the current NexMeet implementation: a small-room WebRTC mesh app with Socket.IO signaling, local-only recording, host controls, and direction-aware screen-share peer connections.
+This document describes the current NexMeet implementation: a small-room WebRTC mesh app with Socket.IO signaling, local-only recording, raised hands, host controls, live screen-share annotations, and direction-aware screen-share peer connections.
 
 ## 1. System Overview
 
@@ -21,9 +21,10 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
 - Enforce the 6-participant room limit.
 - Relay SDP offers, answers, and ICE candidates.
 - Relay chat messages.
-- Broadcast mute/video state.
+- Broadcast mute/video and raised-hand state.
 - Enforce a maximum of 2 active screen sharers per room.
-- Handle host-only mute-all and remove-user actions.
+- Track per-screen annotation grants and relay live annotation events.
+- Handle host-only mute-all, mute-user, and remove-user actions.
 - Transfer host role when the current host leaves.
 - Expose lightweight health and room-info endpoints.
 
@@ -31,6 +32,7 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
 
 - No media forwarding, mixing, transcoding, or recording.
 - No persistent chat storage.
+- No persistent annotation history.
 - No authentication or authorization beyond host checks for host actions.
 - No database; room state is process-local memory.
 
@@ -49,6 +51,7 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
   - Socket.IO server with permissive CORS for development.
   - `rooms`: `Map<roomId, Map<socketId, participant>>`.
   - `roomScreenShares`: `Map<roomId, Set<socketId>>`.
+  - `roomAnnotationGrants`: `Map<roomId, Map<screenOwnerId, Set<grantedSocketId>>>`.
   - `MAX_PARTICIPANTS = 6`.
   - `MAX_SCREEN_SHARES = 2`.
 
@@ -56,6 +59,7 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
 
 - `client/src/App.jsx`
   - App phase state: lobby, connecting, room, error.
+  - Reads invite room IDs from `?room=...` and writes the joined room back to the URL.
   - Starts local media before mounting `Room`, so peer connections can immediately attach local tracks.
   - Shows connection and media errors.
 
@@ -70,6 +74,7 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
   - Tracks selected mic, camera, and speaker devices.
   - Handles device switching and device hot-plug.
   - Captures screen streams with `getDisplayMedia({ video, audio: true })`.
+  - Uses 1280x720 camera capture and 1920x1080 screen capture targets at up to 30 fps.
 
 - `client/src/hooks/usePeerConnections.js`
   - Owns WebRTC camera/mic peer connections.
@@ -84,12 +89,26 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
   - Mixes audio streams into a `MediaStreamDestination`.
   - Records canvas video plus mixed audio through `MediaRecorder`.
 
+- `client/src/hooks/useAnnotations.js`
+  - Stores finalized annotation shapes by `screenOwnerId`.
+  - Emits draw, undo, and clear events once shapes are finalized.
+  - Applies incoming annotation events from Socket.IO.
+  - Removes a screen's local shape state when that share ends.
+
 - `client/src/components/Room.jsx`
   - Registers socket listeners.
   - Emits `join-room` after listeners are attached.
-  - Orchestrates camera signaling, screen-share signaling, chat, host events, recording, and cleanup.
+  - Orchestrates camera signaling, screen-share signaling, chat, hands, host events, annotations, recording, and cleanup.
   - Builds separate camera participant tiles and screen-share tiles.
   - Supports presentation layout for one or two active screen shares.
+
+- `client/src/components/AnnotationOverlay.jsx`
+  - Renders an SVG overlay on top of a screen-share video.
+  - Stores shape coordinates as 0-1 fractions of the actual letterboxed video content.
+  - Captures pointer input only when the current user has drawing access and a tool is selected.
+
+- `client/src/components/AnnotationToolbar.jsx`
+  - Provides pen, highlighter, line, arrow, rectangle, circle, color, undo, clear, and target-selection controls.
 
 ## 3. Room Join and Camera Handshake
 
@@ -168,7 +187,7 @@ remoteStreams: socketId -> MediaStream
 Each camera PC:
 
 - Adds all local tracks from `localStreamRef.current`.
-- Applies camera video encoding constraints: 700 kbps max bitrate and 24 fps max framerate.
+- Applies camera video encoding constraints: 2 Mbps max bitrate and 30 fps max framerate.
 - Sends ICE candidates with `kind: 'camera'`.
 - Queues incoming ICE candidates until `remoteDescription` is set.
 - Uses a gated `onnegotiationneeded` flow for ICE restart renegotiation.
@@ -264,7 +283,74 @@ When a user joins a room with active screen shares, `room-joined` includes `scre
 
 The client tracks active sharers in `activeSharerIds`, which includes both local and remote sharers.
 
-## 8. Recording Architecture
+## 8. Annotation Architecture
+
+Annotations are drawn as client-side SVG overlays on top of screen-share video tiles. They are not baked into the WebRTC screen-share track, so the shared video remains untouched and annotation latency does not affect screen capture encoding.
+
+### Shape model
+
+`useAnnotations` stores shapes by screen owner:
+
+```text
+shapesByScreen: screenOwnerId -> Shape[]
+```
+
+Each shape has an ID, tool, color, and normalized coordinates. Freehand pen/highlighter shapes store point arrays. Line, arrow, rectangle, and circle shapes store start/end coordinates. `AnnotationOverlay` converts those normalized coordinates back into pixels using the actual letterboxed content rectangle of the video element, so marks stay aligned across main view, sidebar view, split presentation view, and different participant window sizes.
+
+### Access model
+
+The screen owner can always draw on their own active screen share. Viewers must request access before drawing on someone else's share.
+
+```text
+Viewer clicks Request draw
+  socket.emit('annotation-request-access', { roomId, screenOwnerId }, ack)
+
+Server:
+  verifies requester and screen owner are in the room
+  verifies screenOwnerId is actively sharing
+  emits annotation-access-requested to the screen owner
+
+Screen owner clicks Allow or Deny
+  socket.emit('annotation-access-response', { roomId, requesterSocketId, approved }, ack)
+
+Server:
+  verifies the responder owns an active screen share
+  updates roomAnnotationGrants[roomId][screenOwnerId]
+  emits annotation-access-updated to the requester
+  emits annotation-access-grant-updated to the owner
+```
+
+Owners can revoke access through `annotation-access-revoke`. When a screen share stops, when a participant leaves, or when a participant is removed, the server clears affected grants and notifies clients.
+
+### Draw flow
+
+```text
+User draws on AnnotationOverlay
+  overlay captures pointer events only when drawing is allowed
+  in-progress shape is previewed locally
+  pointer release finalizes shape
+  useAnnotations.addShape stores it locally
+  socket.emit('annotation-draw', { roomId, screenOwnerId, shape })
+
+Server:
+  canAnnotate(roomId, screenOwnerId, socket.id)
+  if allowed, socket.to(roomId).emit('annotation-draw', { screenOwnerId, shape })
+
+Peers:
+  append shape to shapesByScreen[screenOwnerId]
+  render the same shape over the matching screen-share tile
+```
+
+Undo and clear follow the same authorization path with `annotation-undo` and `annotation-clear`.
+
+### Constraints
+
+- Annotation state is live and ephemeral.
+- The server does not store shape history or replay old shapes to late joiners.
+- Shape lists are scoped by `screenOwnerId`, so two simultaneous shares can be annotated independently.
+- Local cleanup removes shapes when the corresponding screen share ends.
+
+## 9. Recording Architecture
 
 Recording is local to the user who starts it.
 
@@ -288,7 +374,7 @@ When recording stops:
 - Download uses `nexmeet-{roomId}-{timestamp}.webm` from `Room.jsx`.
 - The recording never leaves the browser.
 
-## 9. Socket API
+## 10. Socket API
 
 ### Client to server
 
@@ -299,10 +385,18 @@ When recording stops:
 | `answer` | `{ to, answer, kind }` | Routed directly to `to` |
 | `ice-candidate` | `{ to, candidate, kind }` | Routed directly to `to` |
 | `media-state` | `{ roomId, isMuted, isVideoOff }` | Updates server copy and broadcasts |
+| `hand-state` | `{ roomId, raised }` | Updates server copy and broadcasts |
 | `screen-share-started` | `{ roomId }`, ack | Enforces max 2 active sharers |
 | `screen-share-stopped` | `{ roomId }` | Releases screen-share slot |
+| `annotation-request-access` | `{ roomId, screenOwnerId }`, ack | Request permission to draw on a screen share |
+| `annotation-access-response` | `{ roomId, requesterSocketId, approved }`, ack | Screen owner allows or denies draw access |
+| `annotation-access-revoke` | `{ roomId, screenOwnerId, targetSocketId }`, ack | Screen owner revokes draw access |
+| `annotation-draw` | `{ roomId, screenOwnerId, shape }` | Relays a finalized annotation shape |
+| `annotation-undo` | `{ roomId, screenOwnerId, shapeId }` | Relays removal of one shape |
+| `annotation-clear` | `{ roomId, screenOwnerId }` | Relays clear for one screen's shapes |
 | `chat-message` | `{ roomId, message }` | Server adds id/name/timestamp |
 | `mute-all` | `{ roomId }` | Host-only server check |
+| `mute-user` | `{ roomId, targetSocketId }` | Host-only server check |
 | `remove-user` | `{ roomId, targetSocketId }` | Host-only server check |
 
 ### Server to client
@@ -310,27 +404,36 @@ When recording stops:
 | Event | Payload | Notes |
 | --- | --- | --- |
 | `room-joined` | `{ socketId, isHost, participants, screenSharingSocketIds }` | Sent to joining socket |
-| `user-joined` | `{ socketId, name, isHost, isMuted, isVideoOff }` | Broadcast to existing sockets |
+| `user-joined` | `{ socketId, name, isHost, isMuted, isVideoOff, handRaised }` | Broadcast to existing sockets |
 | `user-left` | `{ socketId }` | Triggers PC cleanup |
 | `room-full` | `{ max }` | Sent to rejected joiner |
 | `offer` | `{ from, offer, kind }` | Camera or screen offer |
 | `answer` | `{ from, answer, kind }` | Camera or screen answer |
 | `ice-candidate` | `{ from, candidate, kind }` | Camera or screen ICE |
 | `peer-media-state` | `{ socketId, isMuted, isVideoOff }` | Updates peer tile state |
+| `peer-hand-state` | `{ socketId, raised }` | Updates peer raised-hand state |
 | `peer-screen-share` | `{ socketId, sharing }` | Updates screen-share state |
+| `annotation-access-requested` | `{ screenOwnerId, requesterSocketId, requesterName }` | Screen owner receives request |
+| `annotation-access-updated` | `{ screenOwnerId, granted }` | Requester receives grant status |
+| `annotation-access-grant-updated` | `{ screenOwnerId, socketId, name?, granted }` | Screen owner receives grant-list update |
+| `annotation-access-revoked` | `{ screenOwnerId, socketId }` | Screen owner receives revoke cleanup |
+| `annotation-draw` | `{ screenOwnerId, shape }` | Adds a remote annotation shape |
+| `annotation-undo` | `{ screenOwnerId, shapeId }` | Removes a remote annotation shape |
+| `annotation-clear` | `{ screenOwnerId }` | Clears remote annotation shapes |
 | `chat-message` | `{ id, from, name, message, timestamp }` | Appended to chat panel |
 | `host-mute-all` | none | Receiver mutes local audio track |
+| `host-mute-user` | none | Receiver mutes local audio track |
 | `host-transferred` | `{ socketId }` | Updates host badges and host controls |
 | `removed-from-room` | none | Receiver leaves room after alert |
 
-## 10. REST API
+## 11. REST API
 
 | Method | Path | Response |
 | --- | --- | --- |
 | GET | `/health` | `{ status: 'ok' }` |
 | GET | `/room/:roomId/info` | `{ exists, count, screenSharesActive, maxScreenShares }` |
 
-## 11. Media and Device Handling
+## 12. Media and Device Handling
 
 ### Initial capture
 
@@ -340,7 +443,7 @@ Captured tracks are enabled or disabled based on the lobby's initial mute/camera
 
 ### Switching devices
 
-- Microphone switching recreates the local stream through `startLocalStream()`.
+- Microphone switching captures a new audio-only stream, preserves current video tracks, stops only the old audio tracks, and asks `Room.jsx` to replace the audio track on active camera PCs.
 - Camera switching captures a new video-only stream, preserves current audio tracks, stops the old video track, and asks `Room.jsx` to replace the video track on active camera PCs.
 - Speaker switching calls `setSinkId()` on audio/video elements when supported.
 
@@ -350,7 +453,7 @@ Captured tracks are enabled or disabled based on the lobby's initial mute/camera
 - Firefox and Safari do not support `setSinkId`, so speaker selection may be unavailable.
 - Production capture requires HTTPS, except on localhost.
 
-## 12. Reliability and Cleanup
+## 13. Reliability and Cleanup
 
 ### ICE candidate queuing
 
@@ -368,6 +471,7 @@ Local leave:
 - Emit `screen-share-stopped` if sharing.
 - Close all camera PCs.
 - Close all outgoing and incoming screen PCs.
+- Drop local annotation shapes and access UI for ended shares.
 - Stop local camera, microphone, and screen tracks.
 - Return to the lobby.
 
@@ -375,12 +479,14 @@ Server disconnect:
 
 - Remove the socket from each room it joined.
 - Release any screen-share slot held by the socket.
+- Clear annotation grants for screens owned by the socket.
+- Revoke annotation access granted to the socket.
 - Broadcast `peer-screen-share` false if needed.
 - Broadcast `user-left`.
 - Transfer host if the leaving socket was host.
-- Delete empty room and screen-share state.
+- Delete empty room, screen-share, and annotation-grant state.
 
-## 13. Scaling and Production Notes
+## 14. Scaling and Production Notes
 
 ### Mesh limits
 
@@ -396,11 +502,13 @@ For larger rooms, migrate media to an SFU such as LiveKit, mediasoup, or Janus. 
 - Put the server behind HTTPS with WebSocket upgrade support.
 - Use a shared store such as Redis if scaling the signaling server horizontally.
 - Add server-side rate limits for chat and signaling events.
+- Add server-side rate limits for annotation events.
 - Consider structured logging and room metrics.
 
-## 14. Important Current Constraints
+## 15. Important Current Constraints
 
 - Rooms and chat messages are in-memory only.
+- Annotation grants and shapes are live-session state only; shapes are not stored on the server.
 - Refreshing the server process drops all rooms.
 - Host identity is not authenticated.
 - Recording is local and records the local user's received media/layout only.

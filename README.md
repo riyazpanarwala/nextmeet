@@ -1,14 +1,15 @@
 # NexMeet - WebRTC Video Conferencing
 
-NexMeet is a browser-based video meeting app built with React, Vite, Node.js, Express, Socket.IO, and native WebRTC. It supports small mesh calls with up to 6 participants per room, real-time chat, host controls, local composite recording, device switching, and up to 2 concurrent screen shares.
+NexMeet is a browser-based video meeting app built with React, Vite, Node.js, Express, Socket.IO, and native WebRTC. It supports small mesh calls with up to 6 participants per room, real-time chat, host controls, raised hands, local composite recording, device switching, invite links, screen-share annotations, and up to 2 concurrent screen shares.
 
-The media path is peer-to-peer. The Node server only handles signaling, room state, chat relay, host actions, and screen-share slot limits.
+The media path is peer-to-peer. The Node server only handles signaling, room state, chat relay, host actions, raised-hand state, annotation access, annotation relay, and screen-share slot limits.
 
 ## Features
 
 ### Meetings
 - Up to 6 participants per room using WebRTC mesh peer connections.
 - Lobby with camera preview, generated room IDs, join-existing-room flow, copy room ID, and pre-join mic/camera toggles.
+- Shared invite links through the `?room=ROOMID` URL parameter.
 - Responsive video grid with participant labels, host badges, muted/camera-off indicators, avatar fallback, and active-speaker highlighting.
 - Room-full handling for the 7th joiner.
 
@@ -28,6 +29,13 @@ The media path is peer-to-peer. The Node server only handles signaling, room sta
 - Users can view two active shares side by side or promote one share as the main presentation.
 - The server rejects a 3rd concurrent screen share with an acknowledgment response.
 
+### Screen Annotations
+- Presenters can draw on screen-share tiles with pen, highlighter, line, arrow, rectangle, and circle tools.
+- Annotation coordinates are stored relative to the actual letterboxed video content, so marks stay aligned across different layouts and window sizes.
+- Viewers can request drawing access on another participant's screen share.
+- Screen owners can approve, deny, or revoke annotation access while sharing.
+- Annotation shapes are relayed live through Socket.IO and are not stored or replayed by the server.
+
 ### Recording
 - Local-only recording through `MediaRecorder`.
 - A canvas compositor records camera tiles and active screen shares into a single layout.
@@ -38,7 +46,8 @@ The media path is peer-to-peer. The Node server only handles signaling, room sta
 ### Collaboration
 - Real-time room chat with unread count.
 - Participants panel with media status.
-- Host-only mute-all and remove-participant controls.
+- Raise/lower hand with header counts, participant badges, and tile badges.
+- Host-only mute-all, mute-participant, and remove-participant controls.
 - Automatic host transfer when the host leaves.
 
 ### Reliability
@@ -58,6 +67,7 @@ The media path is peer-to-peer. The Node server only handles signaling, room sta
 | Server | Node.js, Express 5.2.1 |
 | Media | Native WebRTC |
 | Recording | MediaRecorder, Canvas, Web Audio API |
+| Annotations | SVG overlay rendered over screen-share video |
 
 ## Project Structure
 
@@ -78,11 +88,13 @@ nexmeet/
         |-- main.jsx
         |-- App.jsx               # app phases: lobby, connecting, room, error
         |-- App.css
+        |-- annotations.css
         |-- hooks/
         |   |-- useSocket.js
         |   |-- useMediaDevices.js
         |   |-- usePeerConnections.js
         |   |-- useAudioLevel.js
+        |   |-- useAnnotations.js
         |   `-- useRecording.js
         `-- components/
             |-- Lobby.jsx
@@ -91,7 +103,10 @@ nexmeet/
             |-- Controls.jsx
             |-- ChatPanel.jsx
             |-- ParticipantsPanel.jsx
-            `-- RecordingPanel.jsx
+            |-- RecordingPanel.jsx
+            |-- AnnotationOverlay.jsx
+            |-- AnnotationToolbar.jsx
+            `-- PanelCloseButton.jsx
 ```
 
 ## Quick Start
@@ -214,10 +229,18 @@ This lets two participants share at the same time and keeps their camera streams
 | `answer` | `{ to, answer, kind }` | Forward SDP answer |
 | `ice-candidate` | `{ to, candidate, kind }` | Forward ICE candidate |
 | `media-state` | `{ roomId, isMuted, isVideoOff }` | Broadcast mute/video state |
+| `hand-state` | `{ roomId, raised }` | Broadcast raised-hand state |
 | `screen-share-started` | `{ roomId }`, ack `{ ok, max? }` | Reserve a screen-share slot |
 | `screen-share-stopped` | `{ roomId }` | Release local screen-share slot |
+| `annotation-request-access` | `{ roomId, screenOwnerId }`, ack `{ ok }` | Ask a presenter for drawing access |
+| `annotation-access-response` | `{ roomId, requesterSocketId, approved }`, ack `{ ok }` | Presenter approves or denies access |
+| `annotation-access-revoke` | `{ roomId, screenOwnerId, targetSocketId }`, ack `{ ok }` | Presenter revokes drawing access |
+| `annotation-draw` | `{ roomId, screenOwnerId, shape }` | Relay a completed annotation shape |
+| `annotation-undo` | `{ roomId, screenOwnerId, shapeId }` | Relay undo for one annotation shape |
+| `annotation-clear` | `{ roomId, screenOwnerId }` | Relay clear for one screen's annotations |
 | `chat-message` | `{ roomId, message }` | Send chat message |
 | `mute-all` | `{ roomId }` | Host action: mute all other clients locally |
+| `mute-user` | `{ roomId, targetSocketId }` | Host action: mute one participant locally |
 | `remove-user` | `{ roomId, targetSocketId }` | Host action: remove a participant |
 
 ### Server to Client
@@ -225,16 +248,25 @@ This lets two participants share at the same time and keeps their camera streams
 | Event | Payload | Description |
 | --- | --- | --- |
 | `room-joined` | `{ socketId, isHost, participants, screenSharingSocketIds }` | Join confirmation and existing room state |
-| `user-joined` | `{ socketId, name, isHost, isMuted, isVideoOff }` | New participant joined |
+| `user-joined` | `{ socketId, name, isHost, isMuted, isVideoOff, handRaised }` | New participant joined |
 | `user-left` | `{ socketId }` | Participant left |
 | `room-full` | `{ max }` | Room capacity reached |
 | `offer` | `{ from, offer, kind }` | Incoming SDP offer |
 | `answer` | `{ from, answer, kind }` | Incoming SDP answer |
 | `ice-candidate` | `{ from, candidate, kind }` | Incoming ICE candidate |
 | `peer-media-state` | `{ socketId, isMuted, isVideoOff }` | Peer media state changed |
+| `peer-hand-state` | `{ socketId, raised }` | Peer raised/lowered hand |
 | `peer-screen-share` | `{ socketId, sharing }` | Peer started/stopped screen sharing |
+| `annotation-access-requested` | `{ screenOwnerId, requesterSocketId, requesterName }` | Presenter receives a draw-access request |
+| `annotation-access-updated` | `{ screenOwnerId, granted }` | Requester receives access status |
+| `annotation-access-grant-updated` | `{ screenOwnerId, socketId, name?, granted }` | Presenter receives grant list update |
+| `annotation-access-revoked` | `{ screenOwnerId, socketId }` | Presenter receives revoke confirmation |
+| `annotation-draw` | `{ screenOwnerId, shape }` | Incoming annotation shape |
+| `annotation-undo` | `{ screenOwnerId, shapeId }` | Incoming annotation undo |
+| `annotation-clear` | `{ screenOwnerId }` | Incoming annotation clear |
 | `chat-message` | `{ id, from, name, message, timestamp }` | Incoming chat message |
 | `host-mute-all` | none | Host requested all peers mute |
+| `host-mute-user` | none | Host requested current user mute |
 | `host-transferred` | `{ socketId }` | New host assigned |
 | `removed-from-room` | none | Current user was removed by host |
 
@@ -254,6 +286,8 @@ The client currently ships with public STUN servers in `client/src/hooks/usePeer
 { urls: 'stun:stun1.l.google.com:19302' },
 { urls: 'stun:stun.cloudflare.com:3478' },
 ```
+
+Camera senders are capped at about 2 Mbps and 30 fps. Screen-share senders are capped at about 6 Mbps and 30 fps with a maintain-resolution degradation preference.
 
 For production reliability, add TURN credentials to the same `ICE_SERVERS` array:
 
@@ -444,6 +478,8 @@ For larger rooms, migrate media to an SFU such as LiveKit, mediasoup, or Janus. 
 | ICE candidate arrives early | Candidate is queued until remote description is set |
 | Camera or screen ICE failure | `pc.restartIce()` and renegotiation path |
 | 3rd concurrent screen share | Server ack rejects and the client stops local capture |
+| Viewer wants to draw on a share | Presenter approval is required before annotation events are accepted |
+| Screen share ends | Annotation access and shapes for that screen are cleared |
 | Browser stop-sharing button | Shared track `onended` runs the same cleanup path |
 | Host leaves | Server transfers host to the next participant |
 | User leaves | Camera and screen-share PCs are closed |
