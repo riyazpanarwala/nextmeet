@@ -74,6 +74,23 @@ const SettingsIcon = () => (
   </svg>
 );
 
+const CloseIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+// "More" — grid icon representing the meeting-controls (raise hand, record,
+// chat, people, mute all) panel, distinct from the Device Settings gear.
+const MoreIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </svg>
+);
+
 export function Controls({
   isMuted, isVideoOff, isScreenSharing, isRecording,
   isHandRaised = false,
@@ -86,11 +103,24 @@ export function Controls({
   isHost, onMuteAll,
   devices, selectedDevices, onSwitchAudio, onSwitchVideo, onSwitchSpeaker,
 }) {
-  const [showSettings, setShowSettings] = useState(false);
+  // Two independent panels: "More" = meeting controls (raise hand, record,
+  // chat, people, mute all). "Settings" = device settings (mic/camera/speaker).
+  // Opening one closes the other so they never overlap.
+  const [showMore, setShowMore] = useState(false);
+  const [showDeviceSettings, setShowDeviceSettings] = useState(false);
 
-  const handleSettingsToggle = () => {
-    setShowSettings((s) => !s);
+  const handleMoreToggle = () => {
+    setShowMore((s) => !s);
+    setShowDeviceSettings(false);
   };
+
+  const handleDeviceSettingsToggle = () => {
+    setShowDeviceSettings((s) => !s);
+    setShowMore(false);
+  };
+
+  const closeMore = () => setShowMore(false);
+  const closeDeviceSettings = () => setShowDeviceSettings(false);
 
   const handleDeviceSwitch = async (switchFn, deviceId, label) => {
     try {
@@ -219,10 +249,16 @@ export function Controls({
           <span className="mobile-label">People</span>
         </button>
 
-        {/* Settings */}
-        <button className={`ctrl-btn ${showSettings ? 'active' : ''}`} onClick={handleSettingsToggle} title="Settings">
-          <SettingsIcon />
+        {/* More — meeting controls: raise hand, record, chat, people, mute all */}
+        <button className={`ctrl-btn ${showMore ? 'active' : ''}`} onClick={handleMoreToggle} title="More">
+          <MoreIcon />
           <span className="mobile-label">More</span>
+        </button>
+
+        {/* Settings — device settings: microphone, camera, speaker */}
+        <button className={`ctrl-btn ${showDeviceSettings ? 'active' : ''}`} onClick={handleDeviceSettingsToggle} title="Settings">
+          <SettingsIcon />
+          <span className="mobile-label">Settings</span>
         </button>
 
         <div className="ctrl-divider" />
@@ -243,9 +279,23 @@ export function Controls({
       </div>
     </div>
 
-    {/* Settings panel lives outside the scrollable controls bar so mobile browsers do not clip it. */}
-    {showSettings && (
+    {/* Both panels live outside the scrollable controls bar so mobile browsers do not clip them. */}
+
+    {/* "More" panel — meeting controls */}
+    {showMore && (
       <div className="settings-panel">
+        <div className="settings-panel-header">
+          <h3>Meeting Controls</h3>
+          <button
+            type="button"
+            className="panel-close-btn"
+            onClick={closeMore}
+            title="Close"
+            aria-label="Close"
+          >
+            <CloseIcon />
+          </button>
+        </div>
         <div className="settings-quick-actions">
           <button
             type="button"
@@ -290,8 +340,24 @@ export function Controls({
             </button>
           )}
         </div>
+      </div>
+    )}
 
-        <h3>Device Settings</h3>
+    {/* "Settings" panel — device settings */}
+    {showDeviceSettings && (
+      <div className="settings-panel">
+        <div className="settings-panel-header">
+          <h3>Device Settings</h3>
+          <button
+            type="button"
+            className="panel-close-btn"
+            onClick={closeDeviceSettings}
+            title="Close"
+            aria-label="Close"
+          >
+            <CloseIcon />
+          </button>
+        </div>
 
         <label>Microphone</label>
         <select

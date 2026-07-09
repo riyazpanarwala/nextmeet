@@ -829,6 +829,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             messages={messages}
             onSend={handleSendMessage}
             localSocketId={localSocketId}
+            onClose={handleToggleChat}
           />
         )}
         {showParticipants && (
@@ -845,6 +846,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             localSocketId={localSocketId}
             onMuteUser={(id) => socket.emit('mute-user', { roomId: localInfo.roomId, targetSocketId: id })}
             onRemoveUser={handleRemoveUser}
+            onClose={handleToggleParticipants}
           />
         )}
         {showRecording && (
@@ -865,6 +867,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             onStop={stopRecording}
             onDownload={() => downloadRecording(`nexmeet-${localInfo.roomId}-${Date.now()}.webm`)}
             onDismiss={clearRecording}
+            onClose={handleToggleRecording}
           />
         )}
       </div>

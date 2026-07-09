@@ -696,7 +696,7 @@ select option { background: var(--surface2); }
 }
 .host-ctrl-btn:hover { background: rgba(250,204,21,0.2); }
 
-/* Settings panel */
+/* Settings panel (used by both "More" meeting controls and Device Settings) */
 .settings-panel {
   position: absolute;
   bottom: calc(var(--ctrl-h) + 10px);
@@ -718,6 +718,31 @@ select option { background: var(--surface2); }
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 4px;
+}
+.settings-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.settings-panel-header h3 {
+  flex: 1;
+  margin-bottom: 0;
+}
+.panel-close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.panel-close-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
 }
 .settings-panel label {
   font-size: 11px;
@@ -742,7 +767,9 @@ select option { background: var(--surface2); }
   color: white;
 }
 .settings-quick-actions {
-  display: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 .settings-quick-btn {
   min-height: 42px;
@@ -1166,19 +1193,19 @@ select option { background: var(--surface2); }
   .controls-left  { display: none; }
   .controls-right { display: none; }
   .controls-center {
-    gap: 6px;
+    gap: 5px;
     width: 100%;
     min-width: 0;
     justify-content: space-between;
   }
   .mobile-overflow-action { display: none; }
   .ctrl-btn {
-    flex: 0 0 48px;
-    width: 48px;
-    min-width: 48px;
-    max-width: 48px;
-    min-height: 48px;
-    padding: 7px 4px;
+    flex: 0 0 46px;
+    width: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    min-height: 46px;
+    padding: 6px 3px;
     flex-direction: column;
     gap: 3px;
     font-size: 10px;
@@ -1199,11 +1226,11 @@ select option { background: var(--surface2); }
     white-space: nowrap;
   }
   .leave-btn {
-    flex: 0 0 52px;
-    width: 52px;
-    min-width: 52px;
-    max-width: 52px;
-    padding: 7px 4px;
+    flex: 0 0 50px;
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
+    padding: 6px 3px;
     flex-direction: column;
     gap: 3px;
   }
@@ -1215,12 +1242,6 @@ select option { background: var(--surface2); }
     white-space: nowrap;
     font-size: 9px;
     line-height: 1;
-  }
-  .settings-quick-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 6px;
   }
 
   /* ── Side panels: full-screen slide-up sheets ── */
@@ -1301,19 +1322,19 @@ select option { background: var(--surface2); }
    ═══════════════════════════════════════════ */
 @media (max-width: 380px) {
   .ctrl-btn {
+    flex-basis: 40px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    padding: 5px 2px;
+  }
+  .leave-btn {
     flex-basis: 44px;
     width: 44px;
     min-width: 44px;
     max-width: 44px;
-    padding: 6px 3px;
   }
-  .leave-btn {
-    flex-basis: 48px;
-    width: 48px;
-    min-width: 48px;
-    max-width: 48px;
-  }
-  .ctrl-btn svg { width: 18px; height: 18px; }
+  .ctrl-btn svg { width: 17px; height: 17px; }
   .ctrl-btn .mobile-label { display: none; }
   .video-grid {
     grid-template-columns: 1fr !important;  /* force single column on tiny screens */
