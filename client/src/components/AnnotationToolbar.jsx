@@ -1,5 +1,7 @@
 const TOOLS = [
   { id: 'pen', label: 'Pen' },
+  { id: 'highlighter', label: 'Highlight' },
+  { id: 'line', label: 'Line' },
   { id: 'arrow', label: 'Arrow' },
   { id: 'rect', label: 'Box' },
   { id: 'circle', label: 'Circle' },

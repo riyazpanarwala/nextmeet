@@ -28,11 +28,21 @@ function getContentRect(container, video) {
 
 function renderShape(shape, w, h) {
   const { tool, color, id } = shape;
-  if (tool === 'pen') {
+  if (tool === 'pen' || tool === 'highlighter') {
     const points = shape.points.map((p) => `${p.x * w},${p.y * h}`).join(' ');
+    const isHighlighter = tool === 'highlighter';
     return (
       <polyline key={id} points={points} fill="none" stroke={color}
-        strokeWidth={STROKE_WIDTH} strokeLinecap="round" strokeLinejoin="round" />
+        strokeWidth={isHighlighter ? STROKE_WIDTH * 4 : STROKE_WIDTH}
+        strokeOpacity={isHighlighter ? 0.38 : 1}
+        strokeLinecap="round" strokeLinejoin="round" />
+    );
+  }
+  if (tool === 'line') {
+    const x1 = shape.x1 * w, y1 = shape.y1 * h, x2 = shape.x2 * w, y2 = shape.y2 * h;
+    return (
+      <line key={id} x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke={color} strokeWidth={STROKE_WIDTH} strokeLinecap="round" />
     );
   }
   if (tool === 'rect') {
@@ -75,7 +85,7 @@ export function AnnotationOverlay({
   videoRef,     // ref to the <video> element this overlay sits on top of
   shapes,       // finalized shapes for this screen (from useAnnotations)
   isOwner,      // only the sharer can draw
-  tool,         // 'pen' | 'arrow' | 'rect' | 'circle' | null (null = pass-through)
+  tool,         // selected drawing tool; null = pass-through
   color,
   onAddShape,   // (shapeWithoutId) => void — called once per finished stroke/shape
 }) {
@@ -123,8 +133,8 @@ export function AnnotationOverlay({
     e.target.setPointerCapture?.(e.pointerId);
     const pt = pointFromEvent(e);
     let shape;
-    if (tool === 'pen') {
-      shape = { tool: 'pen', color, points: [pt] };
+    if (tool === 'pen' || tool === 'highlighter') {
+      shape = { tool, color, points: [pt] };
     } else {
       shape = { tool, color, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y };
     }
@@ -135,7 +145,7 @@ export function AnnotationOverlay({
   const handlePointerMove = useCallback((e) => {
     if (!drawingRef.current) return;
     const pt = pointFromEvent(e);
-    if (drawingRef.current.tool === 'pen') {
+    if (drawingRef.current.tool === 'pen' || drawingRef.current.tool === 'highlighter') {
       drawingRef.current = { ...drawingRef.current, points: [...drawingRef.current.points, pt] };
     } else {
       drawingRef.current = { ...drawingRef.current, x2: pt.x, y2: pt.y };
