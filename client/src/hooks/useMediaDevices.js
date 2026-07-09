@@ -39,6 +39,12 @@ function getVideoConstraint(deviceId) {
     : CAMERA_VIDEO_CONSTRAINT;
 }
 
+function getAudioConstraint(deviceId) {
+  return deviceId
+    ? { ...AUDIO_CONSTRAINT, deviceId: { exact: deviceId } }
+    : AUDIO_CONSTRAINT;
+}
+
 export function useMediaDevices() {
   const localStreamRef = useRef(null);
   const [localStream, setLocalStream] = useState(null);
@@ -58,6 +64,18 @@ export function useMediaDevices() {
   const [hasAudioTrack, setHasAudioTrack] = useState(false);
   const [hasVideoTrack, setHasVideoTrack] = useState(false);
   const screenStreamRef = useRef(null);
+
+  // Refs so toggleMute/toggleVideo can read the latest hasAudioTrack/
+  // hasVideoTrack without needing them in their own dependency arrays
+  // (and without the setState-updater-as-getter trick).
+  const isMutedRef = useRef(isMuted);
+  const isVideoOffRef = useRef(isVideoOff);
+  const hasAudioTrackRef = useRef(hasAudioTrack);
+  const hasVideoTrackRef = useRef(hasVideoTrack);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => { isVideoOffRef.current = isVideoOff; }, [isVideoOff]);
+  useEffect(() => { hasAudioTrackRef.current = hasAudioTrack; }, [hasAudioTrack]);
+  useEffect(() => { hasVideoTrackRef.current = hasVideoTrack; }, [hasVideoTrack]);
 
   const loadDevices = useCallback(async () => {
     try {
@@ -80,9 +98,7 @@ export function useMediaDevices() {
       }
 
       const videoConstraint = getVideoConstraint(videoDeviceId);
-      const audioConstraint = audioDeviceId
-        ? { ...AUDIO_CONSTRAINT, deviceId: { exact: audioDeviceId } }
-        : AUDIO_CONSTRAINT;
+      const audioConstraint = getAudioConstraint(audioDeviceId);
 
       let stream;
       let gotAudio = true;
@@ -157,17 +173,11 @@ export function useMediaDevices() {
   // They're also guarded so toggling is a no-op when there's no real track
   // to toggle (e.g. clicking "unmute" when no microphone was ever captured).
   const toggleMute = useCallback(() => {
-    setHasAudioTrack((has) => {
-      if (has) setIsMuted((prev) => !prev);
-      return has;
-    });
+    if (hasAudioTrackRef.current) setIsMuted((prev) => !prev);
   }, []);
 
   const toggleVideo = useCallback(() => {
-    setHasVideoTrack((has) => {
-      if (has) setIsVideoOff((prev) => !prev);
-      return has;
-    });
+    if (hasVideoTrackRef.current) setIsVideoOff((prev) => !prev);
   }, []);
 
   const startScreenShare = useCallback(async () => {
@@ -205,12 +215,47 @@ export function useMediaDevices() {
     setIsScreenSharing(false);
   }, []);
 
+  // Switches the microphone only. Captures a fresh audio-only stream,
+  // keeps the existing video track(s) untouched, and stops only the old
+  // audio track. Mirrors switchVideoDevice's "swap just one kind of
+  // track" approach so that changing your mic never flickers/restarts
+  // the camera or forces a video-track replaceTrack() on active peer
+  // connections.
   const switchAudioDevice = useCallback(
     async (deviceId) => {
-      const newStream = await startLocalStream(deviceId, selectedDevices.videoIn);
-      return newStream;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Microphone switching requires HTTPS or localhost in this browser.');
+      }
+
+      const currentStream = localStreamRef.current;
+      const currentVideoTracks = currentStream?.getVideoTracks() || [];
+      const audioConstraint = getAudioConstraint(deviceId);
+
+      const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraint,
+        video: false,
+      });
+
+      const audioTracks = audioOnlyStream.getAudioTracks();
+      audioTracks.forEach((track) => { track.enabled = !isMutedRef.current; });
+
+      // Stop the old mic track(s) only — camera keeps rolling untouched.
+      currentStream?.getAudioTracks().forEach((track) => track.stop());
+
+      const nextStream = new MediaStream([...audioTracks, ...currentVideoTracks]);
+      const activeAudioDeviceId = audioTracks[0]?.getSettings?.().deviceId || deviceId || '';
+
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      setHasAudioTrack(audioTracks.length > 0);
+      setSelectedDevices((prev) => ({
+        ...prev,
+        audioIn: activeAudioDeviceId || prev.audioIn,
+      }));
+      await loadDevices();
+      return nextStream;
     },
-    [startLocalStream, selectedDevices.videoIn]
+    [loadDevices]
   );
 
   const switchVideoDevice = useCallback(
@@ -236,7 +281,7 @@ export function useMediaDevices() {
         const videoTracks = videoOnlyStream.getVideoTracks();
         videoTracks.forEach((track) => {
           applyContentHint(track, 'motion');
-          track.enabled = !isVideoOff;
+          track.enabled = !isVideoOffRef.current;
         });
 
         const nextStream = new MediaStream([...currentAudioTracks, ...videoTracks]);
@@ -274,7 +319,7 @@ export function useMediaDevices() {
         throw err;
       }
     },
-    [isVideoOff, loadDevices, selectedDevices.videoIn]
+    [loadDevices, selectedDevices.videoIn]
   );
 
   const setSpeakerDevice = useCallback((deviceId) => {
