@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PanelCloseButton } from './PanelCloseButton';
 
 const MicIcon = ({ muted }) =>
   muted ? (
@@ -71,12 +72,6 @@ const SettingsIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="3" />
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-  </svg>
-);
-
-const CloseIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
 
@@ -153,261 +148,251 @@ export function Controls({
   const screenShareTitle = isScreenSharing
     ? 'Stop Sharing'
     : !screenShareSupported
-    ? 'Screen sharing is not supported in this browser'
-    : canShareScreen === false
-    ? 'Screen share limit reached (2 people already sharing)'
-    : 'Share Screen';
+      ? 'Screen sharing is not supported in this browser'
+      : canShareScreen === false
+        ? 'Screen share limit reached (2 people already sharing)'
+        : 'Share Screen';
 
   const micTitle = !hasAudioTrack
     ? 'No microphone available'
     : isMuted
-    ? 'Unmute'
-    : 'Mute';
+      ? 'Unmute'
+      : 'Mute';
 
   const camTitle = !hasVideoTrack
     ? 'No camera available'
     : isVideoOff
-    ? 'Start Video'
-    : 'Stop Video';
+      ? 'Start Video'
+      : 'Stop Video';
 
   return (
     <>
-    <div className="controls-bar">
-      <div className="controls-left">
-        <span className="room-time">
-          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </span>
-      </div>
-
-      <div className="controls-center">
-        {/* Mic — disabled and relabeled when no microphone track was ever captured */}
-        <button
-          className={`ctrl-btn ${(isMuted || !hasAudioTrack) ? 'active-danger' : ''}`}
-          onClick={onToggleMute}
-          disabled={!hasAudioTrack}
-          title={micTitle}
-        >
-          <MicIcon muted={isMuted || !hasAudioTrack} />
-          <span className="mobile-label">{!hasAudioTrack ? 'No mic' : isMuted ? 'Unmute' : 'Mute'}</span>
-        </button>
-
-        {/* Video — disabled and relabeled when no camera track was ever captured */}
-        <button
-          className={`ctrl-btn ${(isVideoOff || !hasVideoTrack) ? 'active-danger' : ''}`}
-          onClick={onToggleVideo}
-          disabled={!hasVideoTrack}
-          title={camTitle}
-        >
-          <CamIcon off={isVideoOff || !hasVideoTrack} />
-          <span className="mobile-label">{!hasVideoTrack ? 'No cam' : isVideoOff ? 'Start' : 'Stop'}</span>
-        </button>
-
-        {/* Screen Share — disabled when unsupported or the concurrent-share cap is reached */}
-        <button
-          className={`ctrl-btn ${isScreenSharing ? 'active-green' : ''}`}
-          onClick={onToggleScreen}
-          disabled={screenShareDisabled}
-          title={screenShareTitle}
-        >
-          <ScreenIcon active={isScreenSharing} />
-          <span className="mobile-label">{isScreenSharing ? 'Stop' : 'Share'}</span>
-        </button>
-
-        <div className="ctrl-divider" />
-
-        {/* Raise hand */}
-        <button
-          className={`ctrl-btn mobile-overflow-action ${isHandRaised ? 'active-hand' : ''}`}
-          onClick={onToggleHand}
-          title={isHandRaised ? 'Lower hand' : 'Raise hand'}
-        >
-          <HandIcon />
-          <span className="mobile-label">{isHandRaised ? 'Lower' : 'Hand'}</span>
-        </button>
-
-        {/* Record */}
-        <button
-          className={`ctrl-btn mobile-overflow-action ${isRecording ? 'active-rec' : ''} ${showRecording ? 'active' : ''}`}
-          onClick={onToggleRecording}
-          title="Recording"
-        >
-          <RecordIcon active={isRecording} />
-          {isRecording && <span className="rec-badge-dot" />}
-          <span className="mobile-label">Rec</span>
-        </button>
-
-        {/* Chat */}
-        <button className={`ctrl-btn mobile-overflow-action ${showChat ? 'active' : ''}`} onClick={onToggleChat} title="Chat">
-          <ChatIcon />
-          {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
-          <span className="mobile-label">Chat</span>
-        </button>
-
-        {/* Participants */}
-        <button className={`ctrl-btn mobile-overflow-action ${showParticipants ? 'active' : ''}`} onClick={onToggleParticipants} title="Participants">
-          <ParticipantsIcon />
-          <span className="mobile-label">People</span>
-        </button>
-
-        {/* More — meeting controls: raise hand, record, chat, people, mute all */}
-        <button className={`ctrl-btn ${showMore ? 'active' : ''}`} onClick={handleMoreToggle} title="More">
-          <MoreIcon />
-          <span className="mobile-label">More</span>
-        </button>
-
-        {/* Settings — device settings: microphone, camera, speaker */}
-        <button className={`ctrl-btn ${showDeviceSettings ? 'active' : ''}`} onClick={handleDeviceSettingsToggle} title="Settings">
-          <SettingsIcon />
-          <span className="mobile-label">Settings</span>
-        </button>
-
-        <div className="ctrl-divider" />
-
-        {/* Leave */}
-        <button className="ctrl-btn leave-btn" onClick={onLeave} title="Leave meeting">
-          <LeaveIcon />
-          <span>Leave</span>
-        </button>
-      </div>
-
-      <div className="controls-right">
-        {isHost && (
-          <button className="host-ctrl-btn" onClick={onMuteAll} title="Mute all participants">
-            Mute All
-          </button>
-        )}
-      </div>
-    </div>
-
-    {/* Both panels live outside the scrollable controls bar so mobile browsers do not clip them. */}
-
-    {/* "More" panel — meeting controls */}
-    {showMore && (
-      <div className="settings-panel">
-        <div className="settings-panel-header">
-          <h3>Meeting Controls</h3>
-          <button
-            type="button"
-            className="panel-close-btn"
-            onClick={closeMore}
-            title="Close"
-            aria-label="Close"
-          >
-            <CloseIcon />
-          </button>
+      <div className="controls-bar">
+        <div className="controls-left">
+          <span className="room-time">
+            {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
         </div>
-        <div className="settings-quick-actions">
+
+        <div className="controls-center">
+          {/* Mic — disabled and relabeled when no microphone track was ever captured */}
           <button
-            type="button"
-            className={`settings-quick-btn ${isHandRaised ? 'active-hand' : ''}`}
+            className={`ctrl-btn ${(isMuted || !hasAudioTrack) ? 'active-danger' : ''}`}
+            onClick={onToggleMute}
+            disabled={!hasAudioTrack}
+            title={micTitle}
+          >
+            <MicIcon muted={isMuted || !hasAudioTrack} />
+            <span className="mobile-label">{!hasAudioTrack ? 'No mic' : isMuted ? 'Unmute' : 'Mute'}</span>
+          </button>
+
+          {/* Video — disabled and relabeled when no camera track was ever captured */}
+          <button
+            className={`ctrl-btn ${(isVideoOff || !hasVideoTrack) ? 'active-danger' : ''}`}
+            onClick={onToggleVideo}
+            disabled={!hasVideoTrack}
+            title={camTitle}
+          >
+            <CamIcon off={isVideoOff || !hasVideoTrack} />
+            <span className="mobile-label">{!hasVideoTrack ? 'No cam' : isVideoOff ? 'Start' : 'Stop'}</span>
+          </button>
+
+          {/* Screen Share — disabled when unsupported or the concurrent-share cap is reached */}
+          <button
+            className={`ctrl-btn ${isScreenSharing ? 'active-green' : ''}`}
+            onClick={onToggleScreen}
+            disabled={screenShareDisabled}
+            title={screenShareTitle}
+          >
+            <ScreenIcon active={isScreenSharing} />
+            <span className="mobile-label">{isScreenSharing ? 'Stop' : 'Share'}</span>
+          </button>
+
+          <div className="ctrl-divider" />
+
+          {/* Raise hand — this bar copy is hidden on mobile via .mobile-overflow-action;
+            the More-panel copy below is the mobile-only fallback for it. */}
+          <button
+            className={`ctrl-btn mobile-overflow-action ${isHandRaised ? 'active-hand' : ''}`}
             onClick={onToggleHand}
+            title={isHandRaised ? 'Lower hand' : 'Raise hand'}
           >
             <HandIcon />
-            <span>{isHandRaised ? 'Lower hand' : 'Raise hand'}</span>
+            <span className="mobile-label">{isHandRaised ? 'Lower' : 'Hand'}</span>
           </button>
+
+          {/* Record */}
           <button
-            type="button"
-            className={`settings-quick-btn ${isRecording || showRecording ? 'active-rec' : ''}`}
+            className={`ctrl-btn mobile-overflow-action ${isRecording ? 'active-rec' : ''} ${showRecording ? 'active' : ''}`}
             onClick={onToggleRecording}
+            title="Recording"
           >
             <RecordIcon active={isRecording} />
-            <span>{isRecording ? 'Recording' : 'Record'}</span>
+            {isRecording && <span className="rec-badge-dot" />}
+            <span className="mobile-label">Rec</span>
           </button>
-          <button
-            type="button"
-            className={`settings-quick-btn ${showChat ? 'active' : ''}`}
-            onClick={onToggleChat}
-          >
+
+          {/* Chat */}
+          <button className={`ctrl-btn mobile-overflow-action ${showChat ? 'active' : ''}`} onClick={onToggleChat} title="Chat">
             <ChatIcon />
-            <span>Chat{unreadCount > 0 ? ` (${unreadCount})` : ''}</span>
+            {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
+            <span className="mobile-label">Chat</span>
           </button>
-          <button
-            type="button"
-            className={`settings-quick-btn ${showParticipants ? 'active' : ''}`}
-            onClick={onToggleParticipants}
-          >
+
+          {/* Participants */}
+          <button className={`ctrl-btn mobile-overflow-action ${showParticipants ? 'active' : ''}`} onClick={onToggleParticipants} title="Participants">
             <ParticipantsIcon />
-            <span>People</span>
+            <span className="mobile-label">People</span>
           </button>
+
+          {/* More — only meaningful once some of the bar buttons above collapse
+            out of view (tablet/mobile). Hidden entirely on desktop via CSS
+            (.more-btn), since every action it holds is already visible in
+            the bar there — showing it too was the duplicate-icon bug. */}
+          <button className={`ctrl-btn more-btn ${showMore ? 'active' : ''}`} onClick={handleMoreToggle} title="More">
+            <MoreIcon />
+            <span className="mobile-label">More</span>
+          </button>
+
+          {/* Settings — device settings: microphone, camera, speaker */}
+          <button className={`ctrl-btn ${showDeviceSettings ? 'active' : ''}`} onClick={handleDeviceSettingsToggle} title="Settings">
+            <SettingsIcon />
+            <span className="mobile-label">Settings</span>
+          </button>
+
+          <div className="ctrl-divider" />
+
+          {/* Leave */}
+          <button className="ctrl-btn leave-btn" onClick={onLeave} title="Leave meeting">
+            <LeaveIcon />
+            <span>Leave</span>
+          </button>
+        </div>
+
+        <div className="controls-right">
           {isHost && (
-            <button
-              type="button"
-              className="settings-quick-btn"
-              onClick={onMuteAll}
-            >
-              <MicIcon muted />
-              <span>Mute all</span>
+            <button className="host-ctrl-btn" onClick={onMuteAll} title="Mute all participants">
+              Mute All
             </button>
           )}
         </div>
       </div>
-    )}
 
-    {/* "Settings" panel — device settings */}
-    {showDeviceSettings && (
-      <div className="settings-panel">
-        <div className="settings-panel-header">
-          <h3>Device Settings</h3>
-          <button
-            type="button"
-            className="panel-close-btn"
-            onClick={closeDeviceSettings}
-            title="Close"
-            aria-label="Close"
-          >
-            <CloseIcon />
-          </button>
+      {/* Both panels live outside the scrollable controls bar so mobile browsers do not clip them. */}
+
+      {/* "More" panel — each quick action below only becomes visible (via CSS
+        mirror-* classes) once its equivalent bar button has actually been
+        hidden at that breakpoint, so nothing is ever shown twice. */}
+      {showMore && (
+        <div className="settings-panel">
+          <div className="settings-panel-header">
+            <h3>Meeting Controls</h3>
+            <PanelCloseButton onClose={closeMore} label="Close" />
+          </div>
+          <div className="settings-quick-actions">
+            <button
+              type="button"
+              className={`settings-quick-btn mirror-hand ${isHandRaised ? 'active-hand' : ''}`}
+              onClick={onToggleHand}
+            >
+              <HandIcon />
+              <span>{isHandRaised ? 'Lower hand' : 'Raise hand'}</span>
+            </button>
+            <button
+              type="button"
+              className={`settings-quick-btn mirror-rec ${isRecording || showRecording ? 'active-rec' : ''}`}
+              onClick={onToggleRecording}
+            >
+              <RecordIcon active={isRecording} />
+              <span>{isRecording ? 'Recording' : 'Record'}</span>
+            </button>
+            <button
+              type="button"
+              className={`settings-quick-btn mirror-chat ${showChat ? 'active' : ''}`}
+              onClick={onToggleChat}
+            >
+              <ChatIcon />
+              <span>Chat{unreadCount > 0 ? ` (${unreadCount})` : ''}</span>
+            </button>
+            <button
+              type="button"
+              className={`settings-quick-btn mirror-people ${showParticipants ? 'active' : ''}`}
+              onClick={onToggleParticipants}
+            >
+              <ParticipantsIcon />
+              <span>People</span>
+            </button>
+            {isHost && (
+              <button
+                type="button"
+                className="settings-quick-btn mirror-muteall"
+                onClick={onMuteAll}
+              >
+                <MicIcon muted />
+                <span>Mute all</span>
+              </button>
+            )}
+          </div>
         </div>
+      )}
 
-        <label>Microphone</label>
-        <select
-          value={selectedDevices.audioIn}
-          onChange={(e) => handleDeviceSwitch(onSwitchAudio, e.target.value, 'microphone')}
-        >
-          {devices.audioIn.length === 0 && <option>No microphone found</option>}
-          {devices.audioIn.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
-            </option>
-          ))}
-        </select>
+      {/* "Settings" panel — device settings */}
+      {showDeviceSettings && (
+        <div className="settings-panel">
+          <div className="settings-panel-header">
+            <h3>Device Settings</h3>
+            <PanelCloseButton onClose={closeDeviceSettings} label="Close" />
+          </div>
 
-        <label>Camera</label>
-        <select
-          value={selectedDevices.videoIn}
-          onChange={(e) => handleDeviceSwitch(onSwitchVideo, e.target.value, 'camera')}
-        >
-          {devices.videoIn.length === 0 && <option>No camera found</option>}
-          {devices.videoIn.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
-            </option>
-          ))}
-        </select>
-        {devices.videoIn.length > 1 && (
-          <button
-            type="button"
-            className="settings-action-btn"
-            onClick={handleCycleCamera}
+          <label>Microphone</label>
+          <select
+            value={selectedDevices.audioIn}
+            onChange={(e) => handleDeviceSwitch(onSwitchAudio, e.target.value, 'microphone')}
           >
-            Switch Camera
-          </button>
-        )}
+            {devices.audioIn.length === 0 && <option>No microphone found</option>}
+            {devices.audioIn.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+              </option>
+            ))}
+          </select>
 
-        <label>Speaker</label>
-        <select
-          value={selectedDevices.audioOut}
-          onChange={(e) => onSwitchSpeaker(e.target.value)}
-        >
-          {devices.audioOut.length === 0 && <option>Default speaker</option>}
-          {devices.audioOut.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
-            </option>
-          ))}
-        </select>
-      </div>
-    )}
+          <label>Camera</label>
+          <select
+            value={selectedDevices.videoIn}
+            onChange={(e) => handleDeviceSwitch(onSwitchVideo, e.target.value, 'camera')}
+          >
+            {devices.videoIn.length === 0 && <option>No camera found</option>}
+            {devices.videoIn.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
+              </option>
+            ))}
+          </select>
+          {devices.videoIn.length > 1 && (
+            <button
+              type="button"
+              className="settings-action-btn"
+              onClick={handleCycleCamera}
+            >
+              Switch Camera
+            </button>
+          )}
+
+          <label>Speaker</label>
+          <select
+            value={selectedDevices.audioOut}
+            onChange={(e) => onSwitchSpeaker(e.target.value)}
+          >
+            {devices.audioOut.length === 0 && <option>Default speaker</option>}
+            {devices.audioOut.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
     </>
   );
 }

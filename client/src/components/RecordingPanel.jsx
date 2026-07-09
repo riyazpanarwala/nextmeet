@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { PanelCloseButton } from './PanelCloseButton';
 
 function formatDuration(secs) {
   const h = Math.floor(secs / 3600);
@@ -43,22 +44,10 @@ export function RecordingPanel({
             LIVE
           </span>
         )}
-        {onClose && (
-          <button
-            className="panel-close-btn"
-            onClick={onClose}
-            title="Close recording panel"
-            aria-label="Close recording panel"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        )}
+        <PanelCloseButton onClose={onClose} label="Close recording panel" />
       </div>
 
       <div className="recording-body">
-        {/* Status */}
         <div className={`rec-status-card ${isRecording ? 'active' : ''}`}>
           <div className="rec-icon-wrap">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -81,7 +70,6 @@ export function RecordingPanel({
           </div>
         </div>
 
-        {/* Info box */}
         <div className="rec-info-box">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
@@ -92,7 +80,6 @@ export function RecordingPanel({
           </span>
         </div>
 
-        {/* Controls */}
         {!isRecording ? (
           <button className="rec-start-btn" onClick={onStart}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
@@ -109,7 +96,6 @@ export function RecordingPanel({
           </button>
         )}
 
-        {/* Download section — shown after recording stops */}
         {lastBlob && !isRecording && (
           <div className="rec-download-section">
             <div className="rec-download-header">
@@ -120,7 +106,6 @@ export function RecordingPanel({
               <span className="rec-filesize">{fileSizeMB} MB</span>
             </div>
 
-            {/* Preview */}
             {blobUrl && (
               <video
                 className="rec-preview"

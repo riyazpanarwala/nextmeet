@@ -1,21 +1,12 @@
+import { PanelCloseButton } from './PanelCloseButton';
+
 export function ParticipantsPanel({ participants, isHost, onMuteUser, onRemoveUser, localSocketId, onClose }) {
   return (
     <div className="side-panel participants-panel">
       <div className="panel-header">
         <h2>Participants</h2>
         <span className="count-badge">{participants.length}</span>
-        {onClose && (
-          <button
-            className="panel-close-btn"
-            onClick={onClose}
-            title="Close participants"
-            aria-label="Close participants"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        )}
+        <PanelCloseButton onClose={onClose} label="Close participants" />
       </div>
       <ul className="participants-list">
         {participants.map((p) => (
