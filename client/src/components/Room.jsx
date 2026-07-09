@@ -943,6 +943,9 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const canShareScreen = isScreenSharing || activeSharerIds.size < MAX_SCREEN_SHARES;
   const pendingAnnotationRequests = Object.values(annotationRequests[localSocketId] || {});
   const activeGrantedAnnotators = Object.values(grantedAnnotators[localSocketId] || {});
+  const showAnnotationDock =
+    drawableAnnotationTargets.length > 0 ||
+    (isScreenSharing && (pendingAnnotationRequests.length > 0 || activeGrantedAnnotators.length > 0));
 
   // ── Room Full overlay ────────────────────────────────────────────
   if (roomFullError) {
@@ -1016,6 +1019,47 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         </div>
       </div>
 
+      {showAnnotationDock && (
+        <div className="annotation-controls-dock">
+          {drawableAnnotationTargets.length > 0 && (
+            <AnnotationToolbar
+              tool={annotationTool}
+              onSelectTool={setAnnotationTool}
+              color={annotationColor}
+              onSelectColor={setAnnotationColor}
+              onUndo={handleAnnotationUndo}
+              onClear={handleAnnotationClear}
+              targets={drawableAnnotationTargets}
+              activeTargetId={effectiveActiveAnnotationScreenOwnerId}
+              onSelectTarget={setActiveAnnotationScreenOwnerId}
+            />
+          )}
+          {isScreenSharing && (pendingAnnotationRequests.length > 0 || activeGrantedAnnotators.length > 0) && (
+            <div className="annotation-access-panel">
+              {pendingAnnotationRequests.map((request) => (
+                <div key={request.socketId} className="annotation-access-row">
+                  <span>{request.name} wants to draw</span>
+                  <button type="button" onClick={() => handleAnnotationAccessResponse(request.socketId, true)}>
+                    Allow
+                  </button>
+                  <button type="button" className="danger" onClick={() => handleAnnotationAccessResponse(request.socketId, false)}>
+                    Deny
+                  </button>
+                </div>
+              ))}
+              {activeGrantedAnnotators.map((drawer) => (
+                <div key={drawer.socketId} className="annotation-access-row granted">
+                  <span>{drawer.name} can draw</span>
+                  <button type="button" className="danger" onClick={() => handleRevokeAnnotationAccess(drawer.socketId)}>
+                    Revoke
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="room-body">
         {hasScreenShare ? (
           <div className="presentation-layout">
@@ -1024,42 +1068,6 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
               {/* Sharer-only drawing toolbar — only relevant while the local
                   user is presenting, so it's mounted here rather than inside
                   a specific tile (which may move between main/sidebar). */}
-              {drawableAnnotationTargets.length > 0 && (
-                <AnnotationToolbar
-                  tool={annotationTool}
-                  onSelectTool={setAnnotationTool}
-                  color={annotationColor}
-                  onSelectColor={setAnnotationColor}
-                  onUndo={handleAnnotationUndo}
-                  onClear={handleAnnotationClear}
-                  targets={drawableAnnotationTargets}
-                  activeTargetId={effectiveActiveAnnotationScreenOwnerId}
-                  onSelectTarget={setActiveAnnotationScreenOwnerId}
-                />
-              )}
-              {isScreenSharing && (pendingAnnotationRequests.length > 0 || activeGrantedAnnotators.length > 0) && (
-                <div className="annotation-access-panel">
-                  {pendingAnnotationRequests.map((request) => (
-                    <div key={request.socketId} className="annotation-access-row">
-                      <span>{request.name} wants to draw</span>
-                      <button type="button" onClick={() => handleAnnotationAccessResponse(request.socketId, true)}>
-                        Allow
-                      </button>
-                      <button type="button" className="danger" onClick={() => handleAnnotationAccessResponse(request.socketId, false)}>
-                        Deny
-                      </button>
-                    </div>
-                  ))}
-                  {activeGrantedAnnotators.map((drawer) => (
-                    <div key={drawer.socketId} className="annotation-access-row granted">
-                      <span>{drawer.name} can draw</span>
-                      <button type="button" className="danger" onClick={() => handleRevokeAnnotationAccess(drawer.socketId)}>
-                        Revoke
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
               {mainScreenTiles.map((p) => (
                 <VideoTile
                   key={p.socketId}

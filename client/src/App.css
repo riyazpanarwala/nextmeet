@@ -365,6 +365,20 @@ select option { background: var(--surface2); }
   min-height: 0;
 }
 
+.annotation-controls-dock {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(10,13,20,0.94);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 /* ─── Video Grid ─────────────────────────── */
 .video-grid {
   flex: 1;
@@ -612,15 +626,11 @@ select option { background: var(--surface2); }
 }
 
 .annotation-access-panel {
-  position: absolute;
-  top: 58px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 6;
+  position: static;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: min(360px, calc(100% - 24px));
+  width: min(360px, 36vw);
   padding: 8px;
   border: 1px solid var(--border-hi);
   border-radius: var(--radius);
@@ -1252,6 +1262,15 @@ select option { background: var(--surface2); }
   .logo-sm span { display: none; }           /* hide "NexMeet" text, keep icon */
   .participant-count-tag { display: none; }
   .room-id-tag { font-size: 11px; }
+  .annotation-controls-dock {
+    justify-content: flex-start;
+    min-height: 44px;
+    padding: 6px 8px;
+  }
+  .annotation-access-panel {
+    width: min(320px, 84vw);
+    flex-shrink: 0;
+  }
 
   /* ── Video grid ─────────────────────── */
   .video-grid {

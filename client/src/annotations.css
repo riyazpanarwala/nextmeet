@@ -10,11 +10,7 @@
 }
 
 .annotation-toolbar {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 6;
+  position: static;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -83,7 +79,6 @@
 /* Mobile: shrink and allow horizontal scroll instead of wrapping/overflowing */
 @media (max-width: 600px) {
   .annotation-toolbar {
-    top: 8px;
     max-width: calc(100% - 16px);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
