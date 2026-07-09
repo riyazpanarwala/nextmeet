@@ -49,6 +49,17 @@ function getRoomSecurity(roomId) {
   return roomSecurity.get(roomId);
 }
 
+function cleanupEmptyRoom(roomId) {
+  const room = rooms.get(roomId);
+  if (room && room.size > 0) return false;
+
+  rooms.delete(roomId);
+  roomScreenShares.delete(roomId);
+  roomAnnotationGrants.delete(roomId);
+  roomSecurity.delete(roomId);
+  return true;
+}
+
 function getAnnotationGrantMap(roomId) {
   if (!roomAnnotationGrants.has(roomId)) roomAnnotationGrants.set(roomId, new Map());
   return roomAnnotationGrants.get(roomId);
@@ -445,6 +456,7 @@ io.on('connection', (socket) => {
       clearAnnotationAccessForScreen(roomId, targetSocketId);
       revokeSocketAnnotationAccess(roomId, targetSocketId);
       io.to(roomId).emit('user-left', { socketId: targetSocketId });
+      cleanupEmptyRoom(roomId);
     }
   });
 
@@ -467,12 +479,7 @@ io.on('connection', (socket) => {
       const leaving = room.get(socket.id);
       room.delete(socket.id);
 
-      if (room.size === 0) {
-        rooms.delete(roomId);
-        roomScreenShares.delete(roomId);
-        roomAnnotationGrants.delete(roomId);
-        roomSecurity.delete(roomId);
-      } else if (leaving?.isHost) {
+      if (!cleanupEmptyRoom(roomId) && leaving?.isHost) {
         // Transfer host to next participant
         const [newHostId, newHostData] = room.entries().next().value;
         room.set(newHostId, { ...newHostData, isHost: true });
