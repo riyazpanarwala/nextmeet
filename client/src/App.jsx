@@ -31,7 +31,7 @@ export default function App() {
   const mediaState = useMediaDevices();
 
   const handleJoin = useCallback(
-    async ({ name, roomId, isMuted, isVideoOff }) => {
+    async ({ name, roomId, isMuted, isVideoOff, password, createPassword }) => {
       setPhase(PHASE.CONNECTING);
 
       // Get media FIRST — localStreamRef must be populated before Room mounts
@@ -64,7 +64,7 @@ export default function App() {
       // listeners in its useEffect → THEN emits join-room.
       // This prevents the race where join-room fires before listeners are attached.
       setInviteRoomInUrl(roomId);
-      setLocalInfo({ name, roomId, isMuted, isVideoOff });
+      setLocalInfo({ name, roomId, isMuted, isVideoOff, password, createPassword });
       setPhase(PHASE.ROOM);
     },
     [socket, mediaState]

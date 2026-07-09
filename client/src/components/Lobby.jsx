@@ -11,6 +11,7 @@ export function Lobby({ onJoin, inviteRoomId = '' }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [roomPassword, setRoomPassword] = useState('');
   const videoRef = useRef(null);
   const streamRef = useRef(null);
 
@@ -84,7 +85,14 @@ export function Lobby({ onJoin, inviteRoomId = '' }) {
     const finalRoomId = (normalizedInviteRoomId || (tab === 'new' ? roomId : joinRoomId)).trim().toUpperCase();
     if (!finalRoomId) return;
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    onJoin({ name: trimmedName, roomId: finalRoomId, isMuted, isVideoOff });
+    onJoin({
+      name: trimmedName,
+      roomId: finalRoomId,
+      isMuted,
+      isVideoOff,
+      password: roomPassword.trim(),
+      createPassword: tab === 'new' && !normalizedInviteRoomId ? roomPassword.trim() : '',
+    });
   };
 
   const handleKey = (e) => { if (e.key === 'Enter') handleJoin(); };
@@ -209,6 +217,19 @@ export function Lobby({ onJoin, inviteRoomId = '' }) {
               />
             </>
           )}
+
+          <label htmlFor="room-password">
+            {tab === 'new' && !normalizedInviteRoomId ? 'Room Password (Optional)' : 'Room Password'}
+          </label>
+          <input
+            id="room-password"
+            type="password"
+            placeholder={tab === 'new' && !normalizedInviteRoomId ? 'Set a room password' : 'Enter room password if required'}
+            value={roomPassword}
+            onChange={(e) => setRoomPassword(e.target.value)}
+            onKeyDown={handleKey}
+            autoComplete="off"
+          />
 
           <button
             className="join-btn"

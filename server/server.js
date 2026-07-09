@@ -20,6 +20,9 @@ const rooms = new Map();
 const MAX_PARTICIPANTS = 6;
 const MAX_CHAT_FILE_BYTES = 5 * 1024 * 1024;
 
+// roomId -> { locked: boolean, password: string }
+const roomSecurity = new Map();
+
 // roomId -> Set<socketId> currently screen-sharing
 const roomScreenShares = new Map();
 const MAX_SCREEN_SHARES = 2;
@@ -39,6 +42,11 @@ function getRoomParticipants(roomId) {
 function getScreenShareSet(roomId) {
   if (!roomScreenShares.has(roomId)) roomScreenShares.set(roomId, new Set());
   return roomScreenShares.get(roomId);
+}
+
+function getRoomSecurity(roomId) {
+  if (!roomSecurity.has(roomId)) roomSecurity.set(roomId, { locked: false, password: '' });
+  return roomSecurity.get(roomId);
 }
 
 function getAnnotationGrantMap(roomId) {
@@ -86,9 +94,25 @@ io.on('connection', (socket) => {
   console.log(`[+] Socket connected: ${socket.id}`);
 
   // ─── JOIN ROOM ───────────────────────────────────────────────
-  socket.on('join-room', ({ roomId, userName, isMuted = false, isVideoOff = false }) => {
+  socket.on('join-room', ({ roomId, userName, isMuted = false, isVideoOff = false, password = '', createPassword = '' }) => {
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
+    const security = getRoomSecurity(roomId);
+    const isFirstJoiner = room.size === 0;
+
+    if (!isFirstJoiner) {
+      if (security.locked) {
+        socket.emit('room-locked');
+        console.log(`[!] Room ${roomId} is locked, rejected ${userName}`);
+        return;
+      }
+
+      if (security.password && security.password !== String(password || '')) {
+        socket.emit('room-password-required', { invalid: Boolean(password) });
+        console.log(`[!] Room ${roomId} requires password, rejected ${userName}`);
+        return;
+      }
+    }
 
     // Enforce max participant limit
     if (room.size >= MAX_PARTICIPANTS) {
@@ -98,7 +122,10 @@ io.on('connection', (socket) => {
     }
 
     socket.join(roomId);
-    const isHost = room.size === 0;
+    const isHost = isFirstJoiner;
+    if (isHost && createPassword) {
+      security.password = String(createPassword).slice(0, 80);
+    }
 
     room.set(socket.id, {
       name: userName,
@@ -125,6 +152,8 @@ io.on('connection', (socket) => {
       isHost,
       participants: others,
       screenSharingSocketIds,
+      roomLocked: security.locked,
+      passwordProtected: Boolean(security.password),
     });
 
     // Notify everyone else about the new user
@@ -244,6 +273,20 @@ io.on('connection', (socket) => {
     });
 
     if (typeof callback === 'function') callback({ ok: true });
+  });
+
+  socket.on('room-lock-set', ({ roomId, locked }, callback) => {
+    const room = rooms.get(roomId);
+    const requester = room?.get(socket.id);
+    if (!requester?.isHost) {
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    const security = getRoomSecurity(roomId);
+    security.locked = Boolean(locked);
+    io.to(roomId).emit('room-lock-updated', { locked: security.locked });
+    if (typeof callback === 'function') callback({ ok: true, locked: security.locked });
   });
 
   socket.on('annotation-access-response', ({ roomId, requesterSocketId, approved }, callback) => {
@@ -428,6 +471,7 @@ io.on('connection', (socket) => {
         rooms.delete(roomId);
         roomScreenShares.delete(roomId);
         roomAnnotationGrants.delete(roomId);
+        roomSecurity.delete(roomId);
       } else if (leaving?.isHost) {
         // Transfer host to next participant
         const [newHostId, newHostData] = room.entries().next().value;

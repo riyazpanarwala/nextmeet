@@ -75,6 +75,21 @@ const SettingsIcon = () => (
   </svg>
 );
 
+const LockIcon = ({ locked }) => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="10" width="16" height="10" rx="2" />
+    {locked ? <path d="M8 10V7a4 4 0 0 1 8 0v3" /> : <path d="M8 10V7a4 4 0 0 1 7.2-2.4" />}
+  </svg>
+);
+
+const SoundIcon = ({ off }) => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    {off && <line x1="1" y1="1" x2="23" y2="23" />}
+    <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+    {!off && <path d="M16 9.5a4 4 0 0 1 0 5M19 7a8 8 0 0 1 0 10" />}
+  </svg>
+);
+
 // "More" — grid icon representing the meeting-controls (raise hand, record,
 // chat, people, mute all) panel, distinct from the Device Settings gear.
 const MoreIcon = () => (
@@ -96,6 +111,8 @@ export function Controls({
   onLeave, onToggleChat, onToggleParticipants, onToggleRecording,
   showChat, showParticipants, showRecording, unreadCount,
   isHost, onMuteAll,
+  roomLocked = false, onToggleRoomLock,
+  joinLeaveSoundsEnabled = true, onToggleJoinLeaveSounds,
   devices, selectedDevices, onSwitchAudio, onSwitchVideo, onSwitchSpeaker,
 }) {
   // Two independent panels: "More" = meeting controls (raise hand, record,
@@ -271,6 +288,11 @@ export function Controls({
 
         <div className="controls-right">
           {isHost && (
+            <button className="host-ctrl-btn" onClick={onToggleRoomLock} title={roomLocked ? 'Unlock meeting' : 'Lock meeting'}>
+              {roomLocked ? 'Unlock' : 'Lock'}
+            </button>
+          )}
+          {isHost && (
             <button className="host-ctrl-btn" onClick={onMuteAll} title="Mute all participants">
               Mute All
             </button>
@@ -343,6 +365,17 @@ export function Controls({
             {isHost && (
               <button
                 type="button"
+                className={`settings-quick-btn mirror-muteall ${roomLocked ? 'active' : ''}`}
+                onClick={onToggleRoomLock}
+              >
+                <LockIcon locked={roomLocked} />
+                <span>{roomLocked ? 'Unlock meeting' : 'Lock meeting'}</span>
+              </button>
+            )}
+
+            {isHost && (
+              <button
+                type="button"
                 className="settings-quick-btn mirror-muteall"
                 onClick={onMuteAll}
               >
@@ -350,6 +383,15 @@ export function Controls({
                 <span>Mute all</span>
               </button>
             )}
+
+            <button
+              type="button"
+              className={`settings-quick-btn mirror-muteall ${!joinLeaveSoundsEnabled ? 'active-danger' : ''}`}
+              onClick={onToggleJoinLeaveSounds}
+            >
+              <SoundIcon off={!joinLeaveSoundsEnabled} />
+              <span>{joinLeaveSoundsEnabled ? 'Sounds on' : 'Sounds off'}</span>
+            </button>
           </div>
         </div>
       )}
@@ -409,6 +451,14 @@ export function Controls({
               </option>
             ))}
           </select>
+
+          <button
+            type="button"
+            className={`settings-action-btn ${!joinLeaveSoundsEnabled ? 'active-danger' : ''}`}
+            onClick={onToggleJoinLeaveSounds}
+          >
+            {joinLeaveSoundsEnabled ? 'Join/leave sounds on' : 'Join/leave sounds off'}
+          </button>
         </div>
       )}
     </>

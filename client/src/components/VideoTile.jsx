@@ -12,6 +12,11 @@ export function VideoTile({
   isPrimary,          // this tile IS the current main view — shows a "Presenting" badge
   annotation,
   annotationAccess,
+  connectionQuality,
+  isPinned,
+  isPip,
+  onTogglePin,
+  onTogglePip,
 }) {
   const videoRef = useRef(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -50,11 +55,50 @@ export function VideoTile({
 
       {/* "Presenting" badge — this is the current main/full-width tile */}
       {isPrimary && (
-        <span className="tile-primary-badge">Presenting</span>
+        <span className="tile-primary-badge">{isScreenShare ? 'Presenting' : 'Pinned'}</span>
       )}
 
       {participant?.handRaised && !isScreenShare && (
         <span className="tile-hand-badge">Hand raised</span>
+      )}
+
+      {!isScreenShare && connectionQuality && (
+        <span className={`tile-quality-badge quality-${connectionQuality}`} title={`Connection quality: ${connectionQuality}`}>
+          <span />
+          {connectionQuality}
+        </span>
+      )}
+
+      {!isScreenShare && (
+        <div className="tile-camera-actions">
+          <button
+            type="button"
+            className={isPinned ? 'active' : ''}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin?.();
+            }}
+            title={isPinned ? 'Unpin participant' : 'Pin participant'}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 4 5 5-4 4v5l-2 2-5-5-5 5 5-5-5-5 2-2h5l4-4Z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={isPip ? 'active' : ''}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePip?.();
+            }}
+            title={isPip ? 'Close floating view' : 'Open floating view'}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <rect x="12" y="12" width="7" height="5" rx="1" />
+            </svg>
+          </button>
+        </div>
       )}
 
       {/* "Set as Main" control — shown on non-primary screen shares so the

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePeerConnections } from '../hooks/usePeerConnections';
 import { useRecording } from '../hooks/useRecording';
 import { useAnnotations } from '../hooks/useAnnotations';
+import { useConnectionQuality } from '../hooks/useConnectionQuality';
 import { VideoTile } from './VideoTile';
 import { Controls } from './Controls';
 import { ChatPanel } from './ChatPanel';
@@ -36,7 +37,18 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const [isHost, setIsHost] = useState(false);
   const [localSocketId, setLocalSocketId] = useState('');
   const [roomFullError, setRoomFullError] = useState(false);
+  const [joinBlockedError, setJoinBlockedError] = useState('');
+  const [roomLocked, setRoomLocked] = useState(false);
   const [localHandRaised, setLocalHandRaised] = useState(false);
+  const [joinLeaveSoundsEnabled, setJoinLeaveSoundsEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('nexmeet-join-leave-sounds') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const [pinnedParticipantId, setPinnedParticipantId] = useState('');
+  const [pipParticipantId, setPipParticipantId] = useState('');
 
   // ── Annotation (screen-share drawing, sharer-only) ───────────────
   const [annotationTool, setAnnotationTool] = useState(null); // 'pen' | 'arrow' | 'rect' | 'circle' | null
@@ -56,16 +68,48 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const isHostRef = useRef(isHost);
   const localSocketIdRef = useRef(localSocketId);
   const showChatRef = useRef(showChat);
+  const joinLeaveSoundsEnabledRef = useRef(joinLeaveSoundsEnabled);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { isVideoOffRef.current = isVideoOff; }, [isVideoOff]);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
   useEffect(() => { localSocketIdRef.current = localSocketId; }, [localSocketId]);
   useEffect(() => { showChatRef.current = showChat; }, [showChat]);
+  useEffect(() => { joinLeaveSoundsEnabledRef.current = joinLeaveSoundsEnabled; }, [joinLeaveSoundsEnabled]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('nexmeet-join-leave-sounds', joinLeaveSoundsEnabled ? 'on' : 'off');
+    } catch {
+      // Ignore storage failures; the in-call toggle still works.
+    }
+  }, [joinLeaveSoundsEnabled]);
 
   // Screen-share refs (avoid stale closures in socket handlers)
   const remoteParticipantsRef = useRef(remoteParticipants);
   useEffect(() => { remoteParticipantsRef.current = remoteParticipants; }, [remoteParticipants]);
   const isScreenSharingRef = useRef(false);
+
+  const playMeetingTone = useCallback((type) => {
+    if (!joinLeaveSoundsEnabledRef.current) return;
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      const context = new AudioContextClass();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = type === 'join' ? 660 : 330;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.18);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.2);
+      setTimeout(() => context.close?.(), 300);
+    } catch (err) {
+      console.warn('[Room] Could not play meeting tone:', err);
+    }
+  }, []);
 
   // ── Recording hook ──────────────────────────────────────────────
   const {
@@ -103,6 +147,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   }, []);
 
   const {
+    peerConnections,
     makeOffer, handleOffer, handleAnswer,
     handleIceCandidate, closePeer, closeAll, replaceTrack,
     makeScreenOffer, handleScreenOffer, handleScreenAnswer,
@@ -155,12 +200,13 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   useEffect(() => {
     if (!socket) return;
 
-    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds }) => {
+    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked }) => {
       console.log('[Room] room-joined', socketId, 'host:', amHost, 'peers:', participants.length);
       setLocalSocketId(socketId);
       localSocketIdRef.current = socketId;
       setIsHost(amHost);
       isHostRef.current = amHost;
+      setRoomLocked(Boolean(locked));
 
       if (participants.length > 0) {
         setRemoteParticipants((prev) => {
@@ -198,6 +244,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       handRaised: theirHandRaised,
     }) => {
       console.log('[Room] user-joined:', socketId, name);
+      playMeetingTone('join');
       setRemoteParticipants((prev) => ({
         ...prev,
         [socketId]: {
@@ -220,6 +267,14 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     const onRoomFull = ({ max }) => {
       console.warn(`[Room] Room is full (max ${max})`);
       setRoomFullError(true);
+    };
+
+    const onRoomLocked = () => {
+      setJoinBlockedError('This meeting is locked by the host.');
+    };
+
+    const onRoomPasswordRequired = ({ invalid }) => {
+      setJoinBlockedError(invalid ? 'Incorrect room password.' : 'This meeting requires a password.');
     };
 
     const onOffer = async ({ from, offer, kind }) => {
@@ -250,6 +305,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
 
     const onUserLeft = ({ socketId }) => {
       console.log('[Room] user-left:', socketId);
+      playMeetingTone('leave');
       closePeerRef.current(socketId);
       closeScreenPeerRef.current(socketId);
       handlePeerLeftRef.current(socketId);
@@ -291,6 +347,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         return next;
       });
       setActiveAnnotationScreenOwnerId((prev) => (prev === socketId ? '' : prev));
+      setPinnedParticipantId((prev) => (prev === socketId ? '' : prev));
+      setPipParticipantId((prev) => (prev === socketId ? '' : prev));
       removeScreenRef.current(socketId);
     };
 
@@ -458,9 +516,15 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       doLeave();
     };
 
+    const onRoomLockUpdated = ({ locked }) => {
+      setRoomLocked(Boolean(locked));
+    };
+
     socket.on('room-joined', onRoomJoined);
     socket.on('user-joined', onUserJoined);
     socket.on('room-full', onRoomFull);
+    socket.on('room-locked', onRoomLocked);
+    socket.on('room-password-required', onRoomPasswordRequired);
     socket.on('offer', onOffer);
     socket.on('answer', onAnswer);
     socket.on('ice-candidate', onIceCandidate);
@@ -478,6 +542,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     socket.on('host-mute-user', onHostMuteUser);
     socket.on('host-transferred', onHostTransferred);
     socket.on('removed-from-room', onRemovedFromRoom);
+    socket.on('room-lock-updated', onRoomLockUpdated);
 
     // Emit join AFTER listeners are registered
     console.log('[Room] Emitting join-room:', localInfo.roomId);
@@ -486,12 +551,16 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       userName: localInfo.name,
       isMuted: isMutedRef.current,
       isVideoOff: isVideoOffRef.current,
+      password: localInfo.password || '',
+      createPassword: localInfo.createPassword || '',
     });
 
     return () => {
       socket.off('room-joined', onRoomJoined);
       socket.off('user-joined', onUserJoined);
       socket.off('room-full', onRoomFull);
+      socket.off('room-locked', onRoomLocked);
+      socket.off('room-password-required', onRoomPasswordRequired);
       socket.off('offer', onOffer);
       socket.off('answer', onAnswer);
       socket.off('ice-candidate', onIceCandidate);
@@ -509,6 +578,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       socket.off('host-mute-user', onHostMuteUser);
       socket.off('host-transferred', onHostTransferred);
       socket.off('removed-from-room', onRemovedFromRoom);
+      socket.off('room-lock-updated', onRoomLockUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -745,6 +815,15 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     socket.emit('mute-all', { roomId: localInfo.roomId });
   }, [socket, localInfo]);
 
+  const handleToggleRoomLock = useCallback(() => {
+    socket.emit('room-lock-set', {
+      roomId: localInfo.roomId,
+      locked: !roomLocked,
+    }, (res) => {
+      if (!res?.ok) alert('Only the host can lock or unlock this meeting.');
+    });
+  }, [socket, localInfo, roomLocked]);
+
   const handleRemoveUser = useCallback(
     (targetSocketId) => socket.emit('remove-user', { roomId: localInfo.roomId, targetSocketId }),
     [socket, localInfo]
@@ -815,6 +894,52 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     if (showChat) setShowChat(false);
     if (showParticipants) setShowParticipants(false);
   };
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const target = event.target;
+      const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable;
+      if (isTyping) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'm') {
+        event.preventDefault();
+        if (hasAudioTrack) handleToggleMute();
+      } else if (key === 'v') {
+        event.preventDefault();
+        if (hasVideoTrack) handleToggleVideo();
+      } else if (key === 'h') {
+        event.preventDefault();
+        handleToggleHand();
+      } else if (key === 'c') {
+        event.preventDefault();
+        handleToggleChat();
+      } else if (key === 'p') {
+        event.preventDefault();
+        handleToggleParticipants();
+      } else if (key === 's') {
+        event.preventDefault();
+        handleToggleScreen();
+      } else if (key === 'r') {
+        event.preventDefault();
+        handleToggleRecording();
+      } else if (event.key === 'Escape') {
+        setShowChat(false);
+        setShowParticipants(false);
+        setShowRecording(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    hasAudioTrack,
+    hasVideoTrack,
+    handleToggleMute,
+    handleToggleVideo,
+    handleToggleHand,
+    handleToggleScreen,
+  ]);
 
   // ── Annotation handlers (sharer-only — see AnnotationToolbar) ────
   const getParticipantName = useCallback((socketId) => {
@@ -961,9 +1086,27 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       };
     }),
   ];
+  const peerIds = allParticipants.filter((p) => !p.isLocal).map((p) => p.socketId);
+  const connectionQualityByPeer = useConnectionQuality(peerConnections, peerIds);
+  const validPinnedParticipantId = allParticipants.some((p) => p.socketId === pinnedParticipantId)
+    ? pinnedParticipantId
+    : '';
+  const validPipParticipantId = allParticipants.some((p) => p.socketId === pipParticipantId)
+    ? pipParticipantId
+    : '';
+  const spotlightParticipant = validPinnedParticipantId
+    ? allParticipants.find((p) => p.socketId === validPinnedParticipantId)
+    : null;
+  const gridParticipants = spotlightParticipant
+    ? allParticipants.filter((p) => p.socketId !== spotlightParticipant.socketId)
+    : allParticipants;
+  const pipParticipant = validPipParticipantId
+    ? allParticipants.find((p) => p.socketId === validPipParticipantId)
+    : null;
 
   const count = allParticipants.length;
-  const cols = count === 1 ? 1 : count <= 4 ? 2 : 3;
+  const gridCount = gridParticipants.length || 1;
+  const cols = gridCount === 1 ? 1 : gridCount <= 4 ? 2 : 3;
   const raisedHandCount = allParticipants.filter((p) => p.handRaised).length;
 
   // ── Screen-share presentation layout ────────────────────────────
@@ -1018,6 +1161,22 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     );
   }
 
+  if (joinBlockedError) {
+    return (
+      <div className="error-screen">
+        <div className="error-card">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2">
+            <rect x="4" y="10" width="16" height="10" rx="2" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+          <h2>Cannot Join Meeting</h2>
+          <p>{joinBlockedError}</p>
+          <button onClick={onLeave}>Back to Lobby</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="room">
       {/* Recording indicator in header when active */}
@@ -1048,6 +1207,11 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           {raisedHandCount > 0 && (
             <span className="participant-count-tag" title="Raised hands">
               Hand {raisedHandCount}
+            </span>
+          )}
+          {roomLocked && (
+            <span className="participant-count-tag room-status-tag locked" title="Meeting is locked">
+              Locked
             </span>
           )}
           {activeSharerIds.size > 0 && (
@@ -1170,21 +1334,65 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
                   participant={p}
                   isLocal={p.isLocal}
                   isScreenShare={false}
+                  connectionQuality={p.isLocal ? null : connectionQualityByPeer[p.socketId]}
+                  isPinned={validPinnedParticipantId === p.socketId}
+                  isPip={validPipParticipantId === p.socketId}
+                  onTogglePin={() => setPinnedParticipantId((prev) => (prev === p.socketId ? '' : p.socketId))}
+                  onTogglePip={() => setPipParticipantId((prev) => (prev === p.socketId ? '' : p.socketId))}
                 />
               ))}
             </div>
           </div>
         ) : (
-          <div className="video-grid" style={{ '--grid-cols': cols }}>
-            {allParticipants.map((p) => (
-              <VideoTile
-                key={p.socketId}
-                stream={p.stream}
-                participant={p}
-                isLocal={p.isLocal}
-                isScreenShare={false}
-              />
-            ))}
+          <div className={`camera-layout ${spotlightParticipant ? 'has-spotlight' : ''}`}>
+            {spotlightParticipant && (
+              <div className="spotlight-tile">
+                <VideoTile
+                  key={spotlightParticipant.socketId}
+                  stream={spotlightParticipant.stream}
+                  participant={spotlightParticipant}
+                  isLocal={spotlightParticipant.isLocal}
+                  isScreenShare={false}
+                  isPrimary
+                  connectionQuality={spotlightParticipant.isLocal ? null : connectionQualityByPeer[spotlightParticipant.socketId]}
+                  isPinned
+                  isPip={validPipParticipantId === spotlightParticipant.socketId}
+                  onTogglePin={() => setPinnedParticipantId('')}
+                  onTogglePip={() => setPipParticipantId((prev) => (prev === spotlightParticipant.socketId ? '' : spotlightParticipant.socketId))}
+                />
+              </div>
+            )}
+            <div className="video-grid" style={{ '--grid-cols': cols }}>
+              {gridParticipants.map((p) => (
+                <VideoTile
+                  key={p.socketId}
+                  stream={p.stream}
+                  participant={p}
+                  isLocal={p.isLocal}
+                  isScreenShare={false}
+                  connectionQuality={p.isLocal ? null : connectionQualityByPeer[p.socketId]}
+                  isPinned={validPinnedParticipantId === p.socketId}
+                  isPip={validPipParticipantId === p.socketId}
+                  onTogglePin={() => setPinnedParticipantId((prev) => (prev === p.socketId ? '' : p.socketId))}
+                  onTogglePip={() => setPipParticipantId((prev) => (prev === p.socketId ? '' : p.socketId))}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {pipParticipant && (
+          <div className="pip-window">
+            <VideoTile
+              stream={pipParticipant.stream}
+              participant={pipParticipant}
+              isLocal={pipParticipant.isLocal}
+              isScreenShare={false}
+              connectionQuality={pipParticipant.isLocal ? null : connectionQualityByPeer[pipParticipant.socketId]}
+              isPip
+              onTogglePin={() => setPinnedParticipantId((prev) => (prev === pipParticipant.socketId ? '' : pipParticipant.socketId))}
+              onTogglePip={() => setPipParticipantId('')}
+            />
           </div>
         )}
 
@@ -1260,6 +1468,10 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
         unreadCount={unreadCount}
         isHost={isHost}
         onMuteAll={handleMuteAll}
+        roomLocked={roomLocked}
+        onToggleRoomLock={handleToggleRoomLock}
+        joinLeaveSoundsEnabled={joinLeaveSoundsEnabled}
+        onToggleJoinLeaveSounds={() => setJoinLeaveSoundsEnabled((enabled) => !enabled)}
         devices={devices}
         selectedDevices={selectedDevices}
         onSwitchAudio={handleSwitchAudioDevice}
