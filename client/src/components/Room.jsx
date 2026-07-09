@@ -8,6 +8,7 @@ import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { RecordingPanel } from './RecordingPanel';
 import { AnnotationToolbar } from './AnnotationToolbar';
+import { downloadAnnotationPdf, downloadAnnotationPng } from '../utils/annotationExport';
 
 const MAX_SCREEN_SHARES = 2;
 
@@ -405,6 +406,21 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       if (!showChatRef.current) setUnreadCount((c) => c + 1);
     };
 
+    const onChatReaction = ({ messageId, reaction, socketId, name }) => {
+      setMessages((prev) => prev.map((msg) => {
+        if (msg.id !== messageId) return msg;
+        const reactions = { ...(msg.reactions || {}) };
+        const users = { ...(reactions[reaction] || {}) };
+        if (users[socketId]) delete users[socketId];
+        else users[socketId] = name || 'Participant';
+
+        if (Object.keys(users).length) reactions[reaction] = users;
+        else delete reactions[reaction];
+
+        return { ...msg, reactions };
+      }));
+    };
+
     const onHostMuteAll = () => {
       const audioTracks = localStreamRef.current?.getAudioTracks() || [];
       audioTracks.forEach((t) => (t.enabled = false));
@@ -457,6 +473,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     socket.on('annotation-access-grant-updated', onAnnotationAccessGrantUpdated);
     socket.on('annotation-access-revoked', onAnnotationAccessRevoked);
     socket.on('chat-message', onChatMessage);
+    socket.on('chat-reaction', onChatReaction);
     socket.on('host-mute-all', onHostMuteAll);
     socket.on('host-mute-user', onHostMuteUser);
     socket.on('host-transferred', onHostTransferred);
@@ -487,6 +504,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       socket.off('annotation-access-grant-updated', onAnnotationAccessGrantUpdated);
       socket.off('annotation-access-revoked', onAnnotationAccessRevoked);
       socket.off('chat-message', onChatMessage);
+      socket.off('chat-reaction', onChatReaction);
       socket.off('host-mute-all', onHostMuteAll);
       socket.off('host-mute-user', onHostMuteUser);
       socket.off('host-transferred', onHostTransferred);
@@ -694,7 +712,21 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   }, [startScreenShare, stopScreenShare, stopScreenSharing, socket, localInfo, activeSharerIds]);
 
   const handleSendMessage = useCallback(
-    (text) => socket.emit('chat-message', { roomId: localInfo.roomId, message: text }),
+    ({ message, file, replyTo }) => socket.emit('chat-message', {
+      roomId: localInfo.roomId,
+      message,
+      file,
+      replyTo,
+    }),
+    [socket, localInfo]
+  );
+
+  const handleReactToMessage = useCallback(
+    (messageId, reaction) => socket.emit('chat-reaction', {
+      roomId: localInfo.roomId,
+      messageId,
+      reaction,
+    }),
     [socket, localInfo]
   );
 
@@ -824,6 +856,26 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
       }
     },
     [clearShapes, effectiveActiveAnnotationScreenOwnerId]
+  );
+  const handleAnnotationExport = useCallback(
+    async (format) => {
+      if (!effectiveActiveAnnotationScreenOwnerId) return;
+      const shapes = shapesByScreen[effectiveActiveAnnotationScreenOwnerId] || [];
+      if (!shapes.length) {
+        alert('There are no annotations to export yet.');
+        return;
+      }
+
+      const screenName = getParticipantName(effectiveActiveAnnotationScreenOwnerId);
+      const title = `${screenName} annotations`;
+      const baseName = `nexmeet-${localInfo.roomId}-${effectiveActiveAnnotationScreenOwnerId}`;
+      if (format === 'pdf') {
+        downloadAnnotationPdf(shapes, title, `${baseName}.pdf`);
+      } else {
+        await downloadAnnotationPng(shapes, title, `${baseName}.png`);
+      }
+    },
+    [effectiveActiveAnnotationScreenOwnerId, getParticipantName, localInfo.roomId, shapesByScreen]
   );
 
   // Build participant list (camera tiles only — screen shares are separate)
@@ -1032,6 +1084,9 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
               targets={drawableAnnotationTargets}
               activeTargetId={effectiveActiveAnnotationScreenOwnerId}
               onSelectTarget={setActiveAnnotationScreenOwnerId}
+              hasShapes={Boolean((shapesByScreen[effectiveActiveAnnotationScreenOwnerId] || []).length)}
+              onExportPng={() => handleAnnotationExport('png')}
+              onExportPdf={() => handleAnnotationExport('pdf')}
             />
           )}
           {isScreenSharing && (pendingAnnotationRequests.length > 0 || activeGrantedAnnotators.length > 0) && (
@@ -1137,6 +1192,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           <ChatPanel
             messages={messages}
             onSend={handleSendMessage}
+            onReact={handleReactToMessage}
             localSocketId={localSocketId}
             onClose={handleToggleChat}
           />

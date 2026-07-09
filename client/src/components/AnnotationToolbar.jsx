@@ -31,6 +31,9 @@ export function AnnotationToolbar({
   targets = [],
   activeTargetId,
   onSelectTarget,
+  hasShapes = false,
+  onExportPng,
+  onExportPdf,
 }) {
   return (
     <div className="annotation-toolbar">
@@ -96,6 +99,27 @@ export function AnnotationToolbar({
       </button>
       <button type="button" className="annot-btn danger" onClick={onClear} title="Clear all annotations">
         Clear
+      </button>
+
+      <div className="annot-divider" />
+
+      <button
+        type="button"
+        className="annot-btn"
+        onClick={onExportPng}
+        disabled={!hasShapes}
+        title="Export annotations as PNG"
+      >
+        PNG
+      </button>
+      <button
+        type="button"
+        className="annot-btn"
+        onClick={onExportPdf}
+        disabled={!hasShapes}
+        title="Export annotations as PDF"
+      >
+        PDF
       </button>
     </div>
   );

@@ -38,6 +38,14 @@
 .annot-btn:hover { background: var(--surface2); color: var(--text); }
 .annot-btn.active { background: var(--accent); color: white; }
 .annot-btn.danger:hover { background: rgba(239, 68, 68, 0.18); color: var(--red); }
+.annot-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.annot-btn:disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
 
 .annot-divider {
   width: 1px;

@@ -18,6 +18,7 @@ const io = new Server(server, {
 // roomId -> Map<socketId, { name, isHost, isMuted, isVideoOff, handRaised }>
 const rooms = new Map();
 const MAX_PARTICIPANTS = 6;
+const MAX_CHAT_FILE_BYTES = 5 * 1024 * 1024;
 
 // roomId -> Set<socketId> currently screen-sharing
 const roomScreenShares = new Map();
@@ -312,17 +313,65 @@ io.on('connection', (socket) => {
   });
 
   // ─── CHAT ────────────────────────────────────────────────────
-  socket.on('chat-message', ({ roomId, message }) => {
+  socket.on('chat-message', ({ roomId, message, file, replyTo }) => {
     const room = rooms.get(roomId);
     const participant = room?.get(socket.id);
+    if (!participant) return;
+
+    const safeMessage = String(message || '').trim().slice(0, 2000);
+    let safeFile = null;
+    if (
+      file &&
+      typeof file.name === 'string' &&
+      typeof file.dataUrl === 'string' &&
+      Number(file.size) > 0 &&
+      Number(file.size) <= MAX_CHAT_FILE_BYTES &&
+      file.dataUrl.length <= Math.ceil(MAX_CHAT_FILE_BYTES * 1.45)
+    ) {
+      safeFile = {
+        name: file.name.slice(0, 120),
+        type: String(file.type || 'application/octet-stream').slice(0, 120),
+        size: Number(file.size),
+        dataUrl: file.dataUrl,
+      };
+    }
+
+    if (!safeMessage && !safeFile) return;
+
     const payload = {
       id: `${socket.id}-${Date.now()}`,
       from: socket.id,
-      name: participant?.name || 'Unknown',
-      message,
+      name: participant.name || 'Unknown',
+      message: safeMessage,
+      file: safeFile,
+      replyTo: replyTo
+        ? {
+            id: String(replyTo.id || '').slice(0, 160),
+            name: String(replyTo.name || 'Participant').slice(0, 80),
+            message: String(replyTo.message || '').slice(0, 180),
+            fileName: String(replyTo.fileName || '').slice(0, 120),
+          }
+        : null,
+      reactions: {},
       timestamp: new Date().toISOString(),
     };
     io.to(roomId).emit('chat-message', payload);
+  });
+
+  socket.on('chat-reaction', ({ roomId, messageId, reaction }) => {
+    const room = rooms.get(roomId);
+    const participant = room?.get(socket.id);
+    if (!participant) return;
+
+    const safeReaction = String(reaction || '').slice(0, 20);
+    if (!['+1', 'Heart', 'Ha'].includes(safeReaction)) return;
+
+    io.to(roomId).emit('chat-reaction', {
+      messageId: String(messageId || '').slice(0, 160),
+      reaction: safeReaction,
+      socketId: socket.id,
+      name: participant.name || 'Participant',
+    });
   });
 
   // ─── HOST CONTROLS ───────────────────────────────────────────
