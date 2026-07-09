@@ -35,6 +35,17 @@ const REACTIONS = [
 
 const REACTION_BY_ID = Object.fromEntries(REACTIONS.map((reaction) => [reaction.id, reaction]));
 
+function AttachmentIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7l-5-5Z" />
+      <path d="M14 2v5h5" />
+      <path d="M9 13h6" />
+      <path d="M9 17h6" />
+    </svg>
+  );
+}
+
 function formatBytes(bytes = 0) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -239,8 +250,9 @@ export function ChatPanel({ messages, onSend, onReact, localSocketId, onClose })
           className="chat-attach-btn"
           onClick={() => fileInputRef.current?.click()}
           title="Attach file"
+          aria-label="Attach file"
         >
-          Attach
+          <AttachmentIcon />
         </button>
         <textarea
           value={input}

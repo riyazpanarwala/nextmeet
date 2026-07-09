@@ -1111,7 +1111,7 @@ select option { background: var(--surface2); }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 16px 0;
+  padding: 10px 16px 0;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -1119,9 +1119,10 @@ select option { background: var(--surface2); }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 9px;
-  border-radius: 10px;
-  background: var(--surface2);
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(59,130,246,0.22);
+  background: rgba(59,130,246,0.08);
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -1148,7 +1149,7 @@ select option { background: var(--surface2); }
   border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
-  align-items: flex-end;
+  align-items: stretch;
   flex-shrink: 0;
 }
 .chat-compose-meta + .chat-input-row {
@@ -1162,11 +1163,14 @@ select option { background: var(--surface2); }
   resize: none;
   font-size: 13px;
   border-radius: var(--radius-sm);
-  padding: 9px 12px;
+  min-height: 58px;
+  padding: 11px 12px;
   line-height: 1.5;
 }
 .chat-input-row button {
-  padding: 9px 12px;
+  width: 42px;
+  min-width: 42px;
+  padding: 0;
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: white;
@@ -1176,16 +1180,33 @@ select option { background: var(--surface2); }
 .chat-input-row button:hover:not(:disabled) { background: #2563eb; }
 .chat-input-row button:disabled { opacity: 0.35; cursor: not-allowed; }
 .chat-input-row .chat-attach-btn {
-  background: var(--surface2);
+  display: grid;
+  place-items: center;
+  align-self: flex-end;
+  height: 42px;
+  background: rgba(26,34,53,0.9);
   color: var(--text-muted);
   border: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 700;
 }
 .chat-input-row .chat-attach-btn:hover {
   border-color: var(--accent);
-  color: var(--text);
-  background: var(--surface2);
+  color: var(--accent);
+  background: rgba(59,130,246,0.1);
+}
+.chat-attach-btn svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.chat-input-row button:not(.chat-attach-btn) {
+  align-self: flex-end;
+  height: 42px;
+  display: grid;
+  place-items: center;
 }
 
 /* ─── Participants Panel ─────────────────── */
