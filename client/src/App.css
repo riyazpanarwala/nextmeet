@@ -2297,6 +2297,44 @@ select option { background: var(--surface2); }
 }
 :root[data-theme="light"] .whiteboard-panel { background: var(--surface2); }
 
+/* Chrome surfaces that use hardcoded dark rgba() instead of variables —
+   these need explicit light-theme overrides since the variable swap
+   above doesn't touch literal color values. */
+:root[data-theme="light"] .room-header {
+  background: rgba(255,255,255,0.92);
+}
+:root[data-theme="light"] .controls-bar {
+  background: rgba(255,255,255,0.96);
+}
+:root[data-theme="light"] .annotation-controls-dock {
+  background: rgba(255,255,255,0.94);
+}
+:root[data-theme="light"] .lobby-card {
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 40px 80px rgba(15,23,42,0.12);
+}
+
+/* Video tile polish — --surface (#fff) and --bg (#f3f5fa) are close in
+   light mode, so tiles need a visible border/shadow to read as distinct
+   cards instead of blending into the page. */
+:root[data-theme="light"] .video-tile {
+  border-color: var(--border);
+  box-shadow: 0 1px 3px rgba(15,23,42,0.08);
+}
+:root[data-theme="light"] .video-tile.speaking {
+  border-color: var(--green);
+}
+:root[data-theme="light"] .avatar-fallback {
+  background: linear-gradient(135deg, #e2e8f0, #eef1f7);
+}
+
+/* Settings/side panels use var(--surface) already (fine), but their
+   shadows were tuned for a dark backdrop — soften for light mode. */
+:root[data-theme="light"] .settings-panel,
+:root[data-theme="light"] .side-panel {
+  box-shadow: 0 20px 50px rgba(15,23,42,0.14);
+}
+
 .lobby-card { position: relative; }
 
 .theme-toggle-btn {
