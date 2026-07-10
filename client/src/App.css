@@ -153,7 +153,7 @@ select option { background: var(--surface2); }
   border: 1px solid rgba(255,255,255,0.18);
   border-radius: 20px;
   background: rgba(15,23,42,0.82);
-  color: var(--text);
+  color: #f1f5f9;
   font-size: 12px;
   font-weight: 600;
   backdrop-filter: blur(8px);
@@ -162,6 +162,7 @@ select option { background: var(--surface2); }
 .preview-control:hover { border-color: var(--accent); }
 .preview-control.off {
   background: rgba(239,68,68,0.88);
+  color: #f1f5f9;
   border-color: rgba(255,255,255,0.22);
 }
 .preview-off {
