@@ -92,11 +92,11 @@ export function ChatPanel({ messages, onSend, onReact, localSocketId, onClose })
       file: filePayload,
       replyTo: replyTo
         ? {
-            id: replyTo.id,
-            name: replyTo.name,
-            message: replyTo.message,
-            fileName: replyTo.file?.name,
-          }
+          id: replyTo.id,
+          name: replyTo.name,
+          message: replyTo.message,
+          fileName: replyTo.file?.name,
+        }
         : null,
     });
     setInput('');
@@ -260,7 +260,7 @@ export function ChatPanel({ messages, onSend, onReact, localSocketId, onClose })
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKey}
             placeholder="Type a message..."
-            rows={2}
+            rows={1}
           />
         </div>
         <button onClick={handleSend} disabled={!input.trim() && !selectedFile}>

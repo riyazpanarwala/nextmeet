@@ -1331,7 +1331,7 @@ select option { background: var(--surface2); }
   border-top: 1px solid var(--border);
   display: flex;
   gap: 10px;
-  align-items: flex-end;
+  align-items: center;
   flex-shrink: 0;
 }
 .chat-compose-meta + .chat-input-row {
@@ -1343,13 +1343,13 @@ select option { background: var(--surface2); }
 .chat-composer-field {
   flex: 1;
   min-width: 0;
-  min-height: 46px;
+  min-height: 44px;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 4px;
-  padding: 6px 8px 6px 6px;
+  padding: 5px 8px 5px 6px;
   border: 1.5px solid var(--border);
-  border-radius: 24px;
+  border-radius: 22px;
   background: var(--surface2);
   transition: border-color 0.18s, box-shadow 0.18s;
 }
@@ -1360,10 +1360,9 @@ select option { background: var(--surface2); }
 .chat-input-row .chat-attach-btn {
   display: grid;
   place-items: center;
-  width: 34px;
-  min-width: 34px;
-  height: 34px;
-  margin-bottom: 1px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: transparent;
   color: var(--text-muted);
@@ -1391,7 +1390,7 @@ select option { background: var(--surface2); }
   font-size: 14px;
   min-height: 34px;
   max-height: 92px;
-  padding: 8px 6px;
+  padding: 6px;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -1419,36 +1418,6 @@ select option { background: var(--surface2); }
   opacity: 0.35;
   cursor: not-allowed;
   box-shadow: none;
-}
-.chat-input-row .chat-attach-btn {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  min-width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  border: none;
-}
-.chat-input-row .chat-attach-btn:hover {
-  color: var(--accent);
-  background: rgba(59,130,246,0.14);
-}
-.chat-attach-btn svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.chat-input-row button:not(.chat-attach-btn) {
-  align-self: flex-end;
-  height: 46px;
-  display: grid;
-  place-items: center;
 }
 
 /* ─── Participants Panel ─────────────────── */
