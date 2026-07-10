@@ -767,7 +767,7 @@ select option { background: var(--surface2); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text);
+  color: #f1f5f9;
   font-size: 12px;
 }
 .annotation-access-row button {
