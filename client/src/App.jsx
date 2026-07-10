@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useSocket } from './hooks/useSocket';
 import { useMediaDevices } from './hooks/useMediaDevices';
+import { useTheme } from './hooks/useTheme';
 import { Lobby } from './components/Lobby';
 import { Room } from './components/Room';
 import './App.css';
@@ -29,6 +30,7 @@ export default function App() {
 
   const { socket, connected } = useSocket();
   const mediaState = useMediaDevices();
+  const { theme, toggleTheme } = useTheme();
 
   const handleJoin = useCallback(
     async ({ name, roomId, isMuted, isVideoOff, password, createPassword }) => {
@@ -47,8 +49,8 @@ export default function App() {
           err?.name === 'NotAllowedError'
             ? 'Camera and microphone permission denied. Please allow access and try again.'
             : err?.name === 'NotFoundError'
-            ? 'No camera or microphone found on this device.'
-            : `Media error: ${err?.message || 'Could not access camera or microphone.'}`;
+              ? 'No camera or microphone found on this device.'
+              : `Media error: ${err?.message || 'Could not access camera or microphone.'}`;
         setError(msg);
         setPhase(PHASE.ERROR);
         return;
@@ -87,7 +89,9 @@ export default function App() {
         </div>
       )}
 
-      {phase === PHASE.LOBBY && <Lobby onJoin={handleJoin} inviteRoomId={inviteRoomId} />}
+      {phase === PHASE.LOBBY && (
+        <Lobby onJoin={handleJoin} inviteRoomId={inviteRoomId} theme={theme} onToggleTheme={toggleTheme} />
+      )}
 
       {phase === PHASE.CONNECTING && (
         <div className="loading-screen">
@@ -102,6 +106,8 @@ export default function App() {
           localInfo={localInfo}
           mediaState={mediaState}
           onLeave={handleLeave}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       )}
 

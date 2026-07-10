@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import { ThemeToggle } from './ThemeToggle';
 
-export function Lobby({ onJoin, inviteRoomId = '' }) {
+export function Lobby({ onJoin, inviteRoomId = '', theme, onToggleTheme }) {
   const normalizedInviteRoomId = inviteRoomId.trim().toUpperCase();
   const [name, setName] = useState('');
   const [roomId, setRoomId] = useState('');
@@ -100,17 +101,18 @@ export function Lobby({ onJoin, inviteRoomId = '' }) {
   return (
     <div className="lobby">
       <div className="lobby-card">
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} className="lobby-theme-toggle" />
 
         {/* Camera preview */}
         <div className="lobby-preview">
           {isVideoOff
             ? <div className="preview-off" aria-label="Camera is off">
-                <span>{name.trim().charAt(0).toUpperCase() || '?'}</span>
-                <p>Camera is off</p>
-              </div>
+              <span>{name.trim().charAt(0).toUpperCase() || '?'}</span>
+              <p>Camera is off</p>
+            </div>
             : permError
-            ? <div className="preview-error">{permError}</div>
-            : <video ref={videoRef} autoPlay muted playsInline />
+              ? <div className="preview-error">{permError}</div>
+              : <video ref={videoRef} autoPlay muted playsInline />
           }
           <div className="preview-label">Preview</div>
           <div className="preview-controls" aria-label="Pre-join media controls">
@@ -139,9 +141,9 @@ export function Lobby({ onJoin, inviteRoomId = '' }) {
         <div className="lobby-form">
           <div className="logo">
             <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-              <circle cx="16" cy="16" r="16" fill="#3b82f6"/>
-              <path d="M8 12h10v8H8z" fill="white"/>
-              <path d="M20 14l4-2v8l-4-2v-4z" fill="white"/>
+              <circle cx="16" cy="16" r="16" fill="#3b82f6" />
+              <path d="M8 12h10v8H8z" fill="white" />
+              <path d="M20 14l4-2v8l-4-2v-4z" fill="white" />
             </svg>
             <span>NexMeet</span>
           </div>
@@ -196,8 +198,8 @@ export function Lobby({ onJoin, inviteRoomId = '' }) {
                 />
                 <button className="copy-btn" onClick={handleCopy} title="Copy room ID">
                   {copied
-                    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
                   }
                 </button>
               </div>

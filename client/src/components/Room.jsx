@@ -13,10 +13,11 @@ import { AnnotationToolbar } from './AnnotationToolbar';
 import { WhiteboardPanel } from './WhiteboardPanel';
 import { downloadAnnotationPdf, downloadAnnotationPng } from '../utils/annotationExport';
 import { useMeetingTimer, formatElapsed } from '../hooks/useMeetingTimer';
+import { ThemeToggle } from './ThemeToggle';
 
 const MAX_SCREEN_SHARES = 2;
 
-export function Room({ socket, localInfo, mediaState, onLeave }) {
+export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTheme }) {
   const {
     localStream, localStreamRef, screenStreamRef,
     isMuted, isVideoOff, isScreenSharing,
@@ -1262,6 +1263,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
           >
             Copy Link
           </button>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
       </div>
 
