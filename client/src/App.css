@@ -1281,7 +1281,6 @@ select option { background: var(--surface2); }
   flex-direction: column;
   gap: 6px;
   padding: 10px 16px 0;
-  border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 .compose-chip {
@@ -1289,11 +1288,16 @@ select option { background: var(--surface2); }
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid rgba(59,130,246,0.22);
   background: rgba(59,130,246,0.08);
   color: var(--text-muted);
   font-size: 11px;
+  animation: chip-in 0.15s ease;
+}
+@keyframes chip-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .compose-chip span {
   flex: 1;
@@ -1304,23 +1308,31 @@ select option { background: var(--surface2); }
 }
 .compose-chip button {
   flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
   color: var(--accent);
   font-size: 11px;
   font-weight: 700;
+  transition: background 0.15s;
 }
+.compose-chip button:hover { background: rgba(59,130,246,0.18); }
 .compose-error {
   color: var(--red);
   font-size: 11px;
+  padding-left: 2px;
 }
 
 .chat-input-row {
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
   border-top: 1px solid var(--border);
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-end;
   flex-shrink: 0;
-  background: rgba(10,13,20,0.18);
 }
 .chat-compose-meta + .chat-input-row {
   border-top: none;
@@ -1334,43 +1346,80 @@ select option { background: var(--surface2); }
   min-height: 46px;
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 5px 6px 5px 5px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(26,34,53,0.72);
-  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+  gap: 4px;
+  padding: 6px 8px 6px 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface2);
+  transition: border-color 0.18s, box-shadow 0.18s;
 }
 .chat-composer-field:focus-within {
-  border-color: rgba(59,130,246,0.7);
-  background: rgba(26,34,53,0.9);
-  box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.14);
+}
+.chat-input-row .chat-attach-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  margin-bottom: 1px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.chat-input-row .chat-attach-btn:hover {
+  color: var(--accent);
+  background: rgba(59,130,246,0.14);
+}
+.chat-attach-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .chat-input-row textarea {
   flex: 1;
   min-width: 0;
   resize: none;
-  font-size: 13px;
+  font-size: 14px;
   min-height: 34px;
   max-height: 92px;
-  padding: 8px 4px;
+  padding: 8px 6px;
   border: none;
   border-radius: 0;
   background: transparent;
   line-height: 1.5;
 }
-.chat-input-row button {
+.chat-input-row button:not(.chat-attach-btn) {
+  flex-shrink: 0;
   width: 42px;
-  min-width: 42px;
+  height: 42px;
   padding: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 50%;
   background: var(--accent);
   color: white;
-  transition: all 0.2s;
-  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 14px rgba(59,130,246,0.32);
+  transition: all 0.18s;
 }
-.chat-input-row button:hover:not(:disabled) { background: #2563eb; }
-.chat-input-row button:disabled { opacity: 0.35; cursor: not-allowed; }
+.chat-input-row button:not(.chat-attach-btn):hover:not(:disabled) {
+  background: #2563eb;
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 6px 18px rgba(59,130,246,0.4);
+}
+.chat-input-row button:not(.chat-attach-btn):disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+}
 .chat-input-row .chat-attach-btn {
   display: grid;
   place-items: center;
@@ -1695,9 +1744,11 @@ select option { background: var(--surface2); }
   .controls-bar {
     padding: 0 8px;
     height: var(--ctrl-h);
-    overflow-x: hidden;
+    overflow-x: auto;
     overflow-y: hidden;
+    scrollbar-width: none;
   }
+  .controls-bar::-webkit-scrollbar { display: none; }
   .controls-left  { display: none; }
   .controls-right { display: none; }
   .controls-center {
@@ -1955,6 +2006,11 @@ select option { background: var(--surface2); }
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 3px 10px;
+}
+
+.meeting-timer-tag {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 /* ── Recording Panel ──────────────────────── */

@@ -12,6 +12,7 @@ import { RecordingPanel } from './RecordingPanel';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { WhiteboardPanel } from './WhiteboardPanel';
 import { downloadAnnotationPdf, downloadAnnotationPng } from '../utils/annotationExport';
+import { useMeetingTimer, formatElapsed } from '../hooks/useMeetingTimer';
 
 const MAX_SCREEN_SHARES = 2;
 
@@ -69,6 +70,7 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
     socket,
     roomId: localInfo.roomId,
   });
+  const elapsedSeconds = useMeetingTimer();
 
   // Stable refs so socket handlers don't re-register on every render
   const isMutedRef = useRef(isMuted);
@@ -1056,19 +1058,19 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
   const screenTiles = [
     ...(isScreenSharing
       ? [{
-          socketId: `${localSocketId}-screen`,
-          stream: screenStreamRef.current,
-          name: localInfo.name,
-          isLocal: true,
-          isScreenShare: true,
-          annotation: {
-            shapes: shapesByScreen[localSocketId] || [],
-            isOwner: true,
-            tool: effectiveActiveAnnotationScreenOwnerId === localSocketId ? annotationTool : null,
-            color: annotationColor,
-            onAddShape: (shape) => handleAnnotationAddShape(localSocketId, shape),
-          },
-        }]
+        socketId: `${localSocketId}-screen`,
+        stream: screenStreamRef.current,
+        name: localInfo.name,
+        isLocal: true,
+        isScreenShare: true,
+        annotation: {
+          shapes: shapesByScreen[localSocketId] || [],
+          isOwner: true,
+          tool: effectiveActiveAnnotationScreenOwnerId === localSocketId ? annotationTool : null,
+          color: annotationColor,
+          onAddShape: (shape) => handleAnnotationAddShape(localSocketId, shape),
+        },
+      }]
       : []),
     ...Object.entries(remoteScreenShares).map(([id, stream]) => {
       const accessStatus = annotationAccessByScreen[id] || 'none';
@@ -1094,8 +1096,8 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
             accessStatus === 'granted'
               ? effectiveActiveAnnotationScreenOwnerId === id ? 'Drawing' : 'Draw'
               : accessStatus === 'pending'
-              ? 'Requested'
-              : 'Request draw',
+                ? 'Requested'
+                : 'Request draw',
           title:
             accessStatus === 'granted'
               ? 'Select this screen as your annotation target'
@@ -1244,6 +1246,9 @@ export function Room({ socket, localInfo, mediaState, onLeave }) {
               🖥️ {activeSharerIds.size}/{MAX_SCREEN_SHARES}
             </span>
           )}
+          <span className="participant-count-tag meeting-timer-tag" title="Meeting duration">
+            ⏱ {formatElapsed(elapsedSeconds)}
+          </span>
           <span className="room-id-tag">Room: {localInfo.roomId}</span>
           <button
             className="copy-room-btn"
