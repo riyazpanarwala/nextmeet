@@ -16,11 +16,11 @@ import { useState, useCallback, useEffect, useRef } from 'react';
  *   mounting the toolbar for the local sharer, and server-side by
  *   rejecting any draw/undo/clear whose screenOwnerId doesn't match the
  *   emitting socket).
- * - Shapes are ephemeral, exactly like chat is NOT ephemeral but hand-state
- *   IS: there's no server-side history, so a participant who joins mid-share
- *   won't see annotations drawn before they joined. That mirrors how
- *   live-annotation works in most conferencing tools and keeps the server
- *   stateless for this feature.
+ * - The server keeps a shape history for the lifetime of an ACTIVE share
+ *   (see roomAnnotationHistory in server.js) so a viewer who joins mid-
+ *   share can be caught up — see setInitialShapes below. That history is
+ *   thrown away the moment the share stops or restarts, so it's still
+ *   ephemeral in the sense that nothing outlives a single share session.
  */
 export function useAnnotations({ socket, roomId }) {
   // screenOwnerId -> Shape[]
@@ -30,6 +30,19 @@ export function useAnnotations({ socket, roomId }) {
   const nextShapeId = useCallback(() => {
     idCounterRef.current += 1;
     return `shp-${Date.now()}-${idCounterRef.current}`;
+  }, []);
+
+  // Called once, right after 'room-joined', to seed a late joiner's local
+  // shape list with whatever the server already had for a screen that's
+  // currently being shared. Overwrites rather than merges since this only
+  // ever fires before any live draw/undo/clear events for that screen
+  // could plausibly have arrived yet.
+  const setInitialShapes = useCallback((screenOwnerId, shapes) => {
+    if (!screenOwnerId || !Array.isArray(shapes) || !shapes.length) return;
+    setShapesByScreen((prev) => ({
+      ...prev,
+      [screenOwnerId]: shapes,
+    }));
   }, []);
 
   // Called by the sharer once a shape is finalized (pointer released).
@@ -104,5 +117,5 @@ export function useAnnotations({ socket, roomId }) {
     };
   }, [socket]);
 
-  return { shapesByScreen, addShape, undoLastShape, clearShapes, removeScreen };
+  return { shapesByScreen, addShape, undoLastShape, clearShapes, removeScreen, setInitialShapes };
 }

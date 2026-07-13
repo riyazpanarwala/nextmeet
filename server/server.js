@@ -42,6 +42,16 @@ const MAX_SCREEN_SHARES = 2;
 // roomId -> Map<screenOwnerId, Set<grantedSocketId>>
 const roomAnnotationGrants = new Map();
 
+// roomId -> Map<screenOwnerId, Shape[]>
+// Stores annotation shapes drawn on an ACTIVE screen share so a viewer who
+// joins mid-share can be caught up instead of seeing a blank overlay.
+// Cleared whenever that screen share starts fresh or stops — annotations
+// are still ephemeral to a single share session, this just extends
+// "ephemeral" to cover "for the lifetime of one active share" instead of
+// "only from the moment you personally happened to be watching."
+const roomAnnotationHistory = new Map();
+const MAX_ANNOTATION_HISTORY_PER_SCREEN = 300;
+
 // roomId -> { open: boolean, shapes: Shape[] }
 const roomWhiteboards = new Map();
 
@@ -87,6 +97,7 @@ function cleanupEmptyRoom(roomId) {
   rooms.delete(roomId);
   roomScreenShares.delete(roomId);
   roomAnnotationGrants.delete(roomId);
+  roomAnnotationHistory.delete(roomId);
   roomSecurity.delete(roomId);
   roomWhiteboards.delete(roomId);
   roomTimers.delete(roomId);
@@ -109,6 +120,21 @@ function getAnnotationGrantSet(roomId, screenOwnerId) {
   return grants.get(screenOwnerId);
 }
 
+function getAnnotationHistoryMap(roomId) {
+  if (!roomAnnotationHistory.has(roomId)) roomAnnotationHistory.set(roomId, new Map());
+  return roomAnnotationHistory.get(roomId);
+}
+
+function getAnnotationHistoryList(roomId, screenOwnerId) {
+  const history = getAnnotationHistoryMap(roomId);
+  if (!history.has(screenOwnerId)) history.set(screenOwnerId, []);
+  return history.get(screenOwnerId);
+}
+
+function clearAnnotationHistoryForScreen(roomId, screenOwnerId) {
+  roomAnnotationHistory.get(roomId)?.delete(screenOwnerId);
+}
+
 function canAnnotate(roomId, screenOwnerId, socketId) {
   if (screenOwnerId === socketId) return roomScreenShares.get(roomId)?.has(screenOwnerId) === true;
   return roomAnnotationGrants.get(roomId)?.get(screenOwnerId)?.has(socketId) === true;
@@ -124,6 +150,11 @@ function clearAnnotationAccessForScreen(roomId, screenOwnerId) {
       granted: false,
     });
   });
+  // Access and history always end together — once nobody can draw on a
+  // screen (it stopped sharing, or is starting a brand new share), any
+  // shapes drawn on the PREVIOUS session are no longer relevant to catch
+  // late joiners up on.
+  clearAnnotationHistoryForScreen(roomId, screenOwnerId);
 }
 
 function revokeSocketAnnotationAccess(roomId, socketId) {
@@ -199,6 +230,17 @@ io.on('connection', (socket) => {
     // can render placeholders / expect incoming screen offers.
     const screenSharingSocketIds = Array.from(getScreenShareSet(roomId));
 
+    // Catch the new joiner up on shapes already drawn on any screen that's
+    // CURRENTLY being shared, so they don't see a blank overlay while
+    // everyone else sees the full annotation history. Only active shares
+    // have history at all — it's cleared the moment a share stops (see
+    // clearAnnotationAccessForScreen), so there's nothing stale to leak in.
+    const annotationHistory = {};
+    screenSharingSocketIds.forEach((screenOwnerId) => {
+      const shapes = roomAnnotationHistory.get(roomId)?.get(screenOwnerId);
+      if (shapes && shapes.length) annotationHistory[screenOwnerId] = shapes;
+    });
+
     socket.emit('room-joined', {
       socketId: socket.id,
       isHost,
@@ -208,6 +250,7 @@ io.on('connection', (socket) => {
       passwordProtected: Boolean(security.password),
       whiteboard: getRoomWhiteboard(roomId),
       roomCreatedAt: getRoomCreatedAt(roomId),
+      annotationHistory,
     });
 
     // Notify everyone else about the new user
@@ -282,6 +325,12 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Defensive reset — a fresh share should never inherit access grants
+    // or replay shapes from that same socket's earlier share this session,
+    // even though the stop/disconnect paths already clear these. Cheap,
+    // and avoids a race if this ever fires before a prior stop's cleanup lands.
+    clearAnnotationAccessForScreen(roomId, socket.id);
+
     shares.add(socket.id);
     socket.to(roomId).emit('peer-screen-share', {
       socketId: socket.id,
@@ -307,8 +356,10 @@ io.on('connection', (socket) => {
   // server-side enforcement of "only the person sharing their screen can
   // draw on it." The client already only mounts drawing controls for the
   // local sharer, but a client is untrusted, so we re-check here too.
-  // No server-side shape history is kept: annotations are relayed live and
-  // are not replayed for participants who join mid-share.
+  // A shape history IS kept per active share (see roomAnnotationHistory)
+  // so late joiners can be caught up — this is separate from persistent
+  // storage: the history only exists for the lifetime of one active share
+  // and is thrown away the moment it stops or restarts.
   socket.on('annotation-request-access', ({ roomId, screenOwnerId }, callback) => {
     const room = rooms.get(roomId);
     const requester = room?.get(socket.id);
@@ -396,16 +447,32 @@ io.on('connection', (socket) => {
 
   socket.on('annotation-draw', ({ roomId, screenOwnerId, shape }) => {
     if (!canAnnotate(roomId, screenOwnerId, socket.id)) return;
+    if (shape && typeof shape === 'object') {
+      const history = getAnnotationHistoryList(roomId, screenOwnerId);
+      history.push(shape);
+      // Cap so a very long/abusive session can't grow this unbounded —
+      // oldest strokes roll off first, same tradeoff a live viewer already
+      // implicitly accepts (they wouldn't have seen those either).
+      if (history.length > MAX_ANNOTATION_HISTORY_PER_SCREEN) {
+        history.splice(0, history.length - MAX_ANNOTATION_HISTORY_PER_SCREEN);
+      }
+    }
     socket.to(roomId).emit('annotation-draw', { screenOwnerId, shape });
   });
 
   socket.on('annotation-undo', ({ roomId, screenOwnerId, shapeId }) => {
     if (!canAnnotate(roomId, screenOwnerId, socket.id)) return;
+    const history = roomAnnotationHistory.get(roomId)?.get(screenOwnerId);
+    if (history) {
+      const index = history.findIndex((s) => s.id === shapeId);
+      if (index !== -1) history.splice(index, 1);
+    }
     socket.to(roomId).emit('annotation-undo', { screenOwnerId, shapeId });
   });
 
   socket.on('annotation-clear', ({ roomId, screenOwnerId }) => {
     if (!canAnnotate(roomId, screenOwnerId, socket.id)) return;
+    roomAnnotationHistory.get(roomId)?.set(screenOwnerId, []);
     socket.to(roomId).emit('annotation-clear', { screenOwnerId });
   });
 

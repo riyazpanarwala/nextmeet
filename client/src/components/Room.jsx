@@ -66,7 +66,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   const [annotationRequests, setAnnotationRequests] = useState({});
   const [grantedAnnotators, setGrantedAnnotators] = useState({});
   const [activeAnnotationScreenOwnerId, setActiveAnnotationScreenOwnerId] = useState('');
-  const { shapesByScreen, addShape, undoLastShape, clearShapes, removeScreen } = useAnnotations({
+  const { shapesByScreen, addShape, undoLastShape, clearShapes, removeScreen, setInitialShapes } = useAnnotations({
     socket,
     roomId: localInfo.roomId,
   });
@@ -216,11 +216,17 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   const removeScreenRef = useRef(removeScreen);
   useEffect(() => { removeScreenRef.current = removeScreen; }, [removeScreen]);
 
+  // Stable ref so the one-time room-joined handler (registered in an
+  // effect with an empty dependency array) can seed late-joiner
+  // annotation history without needing setInitialShapes in its deps.
+  const setInitialShapesRef = useRef(setInitialShapes);
+  useEffect(() => { setInitialShapesRef.current = setInitialShapes; }, [setInitialShapes]);
+
   // ── Register socket listeners ONCE, then emit join-room ─────────
   useEffect(() => {
     if (!socket) return;
 
-    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked, whiteboard: initialWhiteboard, roomCreatedAt: serverRoomCreatedAt }) => {
+    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked, whiteboard: initialWhiteboard, roomCreatedAt: serverRoomCreatedAt, annotationHistory }) => {
       console.log('[Room] room-joined', socketId, 'host:', amHost, 'peers:', participants.length);
       setLocalSocketId(socketId);
       localSocketIdRef.current = socketId;
@@ -254,6 +260,17 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       // will arrive shortly since the sharer re-offers on 'user-joined'.
       if (screenSharingSocketIds?.length) {
         setActiveSharerIds(new Set(screenSharingSocketIds));
+      }
+
+      // Catch up on annotations drawn on any screen that's currently being
+      // shared, so a late joiner sees the same marks everyone else does
+      // instead of a blank overlay. Only ever populated for screens that
+      // are ACTIVELY sharing right now — see server.js's room-joined
+      // handler for why nothing stale can leak in here.
+      if (annotationHistory) {
+        Object.entries(annotationHistory).forEach(([screenOwnerId, shapes]) => {
+          setInitialShapesRef.current(screenOwnerId, shapes);
+        });
       }
     };
 
