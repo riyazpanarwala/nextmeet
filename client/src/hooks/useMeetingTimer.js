@@ -1,15 +1,32 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 
-export function useMeetingTimer() {
+// Computes elapsed time from a SHARED anchor timestamp (the room's
+// server-stamped creation time, ms epoch) rather than this client's own
+// Date.now() at mount. Every participant receives the same roomCreatedAt
+// value from the server in 'room-joined', so all clients' timers count
+// from the identical moment instead of drifting apart by however many
+// seconds/minutes separated when each person actually joined.
+//
+// Returns 0 until roomCreatedAt is known (e.g. briefly, before
+// 'room-joined' has arrived).
+export function useMeetingTimer(roomCreatedAt) {
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
-    const startTimeRef = useRef(Date.now());
 
     useEffect(() => {
-        const interval = setInterval(() => {
-            setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
-        }, 1000);
+        if (!roomCreatedAt) {
+            setElapsedSeconds(0);
+            return undefined;
+        }
+
+        const update = () => {
+            // Clamp to 0 in case of minor client/server clock skew that
+            // would otherwise show a brief negative value right at join.
+            setElapsedSeconds(Math.max(0, Math.floor((Date.now() - roomCreatedAt) / 1000)));
+        };
+        update();
+        const interval = setInterval(update, 1000);
         return () => clearInterval(interval);
-    }, []);
+    }, [roomCreatedAt]);
 
     return elapsedSeconds;
 }

@@ -45,6 +45,14 @@ const roomAnnotationGrants = new Map();
 // roomId -> { open: boolean, shapes: Shape[] }
 const roomWhiteboards = new Map();
 
+// roomId -> ms epoch when the room was first created. Stamped ONCE by the
+// server, at room-creation time, and handed to every joiner (existing and
+// future) so every client's meeting timer counts from the exact same
+// anchor point instead of each client's own local Date.now() at the
+// moment THEY happened to join — which drifted from each other by
+// however many seconds/minutes apart people actually joined.
+const roomTimers = new Map();
+
 function getRoomParticipants(roomId) {
   const room = rooms.get(roomId);
   if (!room) return [];
@@ -64,6 +72,14 @@ function getRoomSecurity(roomId) {
   return roomSecurity.get(roomId);
 }
 
+// Lazily stamps a room's creation time on first access so this is safe to
+// call defensively, but in practice it's set explicitly at the moment of
+// creation in the join-room handler below.
+function getRoomCreatedAt(roomId) {
+  if (!roomTimers.has(roomId)) roomTimers.set(roomId, Date.now());
+  return roomTimers.get(roomId);
+}
+
 function cleanupEmptyRoom(roomId) {
   const room = rooms.get(roomId);
   if (room && room.size > 0) return false;
@@ -73,6 +89,7 @@ function cleanupEmptyRoom(roomId) {
   roomAnnotationGrants.delete(roomId);
   roomSecurity.delete(roomId);
   roomWhiteboards.delete(roomId);
+  roomTimers.delete(roomId);
   return true;
 }
 
@@ -158,6 +175,9 @@ io.on('connection', (socket) => {
     if (isHost && createPassword) {
       security.password = String(createPassword).slice(0, 80);
     }
+    if (isFirstJoiner) {
+      roomTimers.set(roomId, Date.now());
+    }
 
     room.set(socket.id, {
       name: userName,
@@ -187,6 +207,7 @@ io.on('connection', (socket) => {
       roomLocked: security.locked,
       passwordProtected: Boolean(security.password),
       whiteboard: getRoomWhiteboard(roomId),
+      roomCreatedAt: getRoomCreatedAt(roomId),
     });
 
     // Notify everyone else about the new user

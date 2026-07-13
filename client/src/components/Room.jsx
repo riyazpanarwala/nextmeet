@@ -46,6 +46,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   const [roomFullError, setRoomFullError] = useState(false);
   const [joinBlockedError, setJoinBlockedError] = useState('');
   const [roomLocked, setRoomLocked] = useState(false);
+  const [roomCreatedAt, setRoomCreatedAt] = useState(null);
   const [localHandRaised, setLocalHandRaised] = useState(false);
   const [joinLeaveSoundsEnabled, setJoinLeaveSoundsEnabled] = useState(() => {
     try {
@@ -73,7 +74,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
     socket,
     roomId: localInfo.roomId,
   });
-  const elapsedSeconds = useMeetingTimer();
+  const elapsedSeconds = useMeetingTimer(roomCreatedAt);
 
   // Stable refs so socket handlers don't re-register on every render
   const isMutedRef = useRef(isMuted);
@@ -219,13 +220,14 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   useEffect(() => {
     if (!socket) return;
 
-    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked, whiteboard: initialWhiteboard }) => {
+    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked, whiteboard: initialWhiteboard, roomCreatedAt: serverRoomCreatedAt }) => {
       console.log('[Room] room-joined', socketId, 'host:', amHost, 'peers:', participants.length);
       setLocalSocketId(socketId);
       localSocketIdRef.current = socketId;
       setIsHost(amHost);
       isHostRef.current = amHost;
       setRoomLocked(Boolean(locked));
+      setRoomCreatedAt(serverRoomCreatedAt || Date.now());
       whiteboard.setInitialWhiteboard(initialWhiteboard);
 
       if (participants.length > 0) {
