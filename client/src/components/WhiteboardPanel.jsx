@@ -95,9 +95,10 @@ export function WhiteboardPanel({
   const [size, setSize] = useState({ width: 1, height: 1 });
   const [liveShape, setLiveShape] = useState(null);
   // Same click-to-place + type model as AnnotationOverlay's text tool —
-  // see the comment there for why it needs separate state from the
-  // drag-based tools.
+  // see the comments there for the desktop-only focus-race fix (ref-based
+  // focus + preventDefault instead of relying on the `autoFocus` attribute).
   const [textEditor, setTextEditor] = useState(null); // { x, y, value }
+  const textInputRef = useRef(null);
 
   useEffect(() => {
     const board = boardRef.current;
@@ -137,6 +138,16 @@ export function WhiteboardPanel({
 
   const cancelTextEditor = useCallback(() => setTextEditor(null), []);
 
+  // See AnnotationOverlay.jsx for why this is ref-based rather than
+  // `autoFocus`, and why the dependency is Boolean(textEditor) rather than
+  // textEditor itself (avoids re-focusing on every keystroke).
+  useEffect(() => {
+    if (textEditor) {
+      textInputRef.current?.focus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(textEditor)]);
+
   useEffect(() => {
     if (tool !== 'text' && textEditor) {
       commitTextEditor();
@@ -148,6 +159,11 @@ export function WhiteboardPanel({
     if (!tool) return;
 
     if (tool === 'text') {
+      // Cancels the browser's native mousedown default focus-shift — the
+      // desktop-only bug where the newly mounted input lost focus before
+      // a character could be typed. See AnnotationOverlay.jsx for the
+      // full explanation.
+      event.preventDefault();
       commitTextEditor();
       const point = pointFromEvent(event);
       setTextEditor({ x: point.x, y: point.y, value: '' });
@@ -240,7 +256,7 @@ export function WhiteboardPanel({
             onPointerDown={(e) => e.stopPropagation()}
           >
             <input
-              autoFocus
+              ref={textInputRef}
               type="text"
               value={textEditor.value}
               maxLength={TEXT_MAX_LENGTH}

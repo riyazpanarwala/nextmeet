@@ -117,6 +117,7 @@ export function AnnotationOverlay({
   // the normalized position of the in-progress text box and its current
   // (uncommitted) value.
   const [textEditor, setTextEditor] = useState(null); // { x, y, value }
+  const textInputRef = useRef(null);
 
   const recalc = useCallback(() => {
     setRect(getContentRect(containerRef.current, videoRef.current));
@@ -172,6 +173,26 @@ export function AnnotationOverlay({
 
   const cancelTextEditor = useCallback(() => setTextEditor(null), []);
 
+  // Focus the input once a text-editing SESSION starts (not on every
+  // keystroke — see the [Boolean(textEditor)] dependency below). We do
+  // this imperatively via a ref rather than relying on the input's
+  // `autoFocus` attribute, because on desktop, mousedown carries a native
+  // default action that shifts focus based on the ORIGINAL click target
+  // (this overlay div, which isn't focusable) — that default action runs
+  // right after our pointerdown handler returns, which raced with and
+  // undid React's autoFocus, immediately blurring the input before a
+  // single character could be typed. Touch's touchstart doesn't carry
+  // that same default action, which is why this only broke on desktop.
+  // preventDefault() in handlePointerDown (below) cancels that native
+  // focus-shift outright; this effect is the belt-and-suspenders way of
+  // making sure focus lands correctly regardless of browser timing.
+  useEffect(() => {
+    if (textEditor) {
+      textInputRef.current?.focus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(textEditor)]);
+
   // If the tool changes away from 'text' (or access is revoked) while a
   // text box is still being typed, commit it rather than silently losing
   // whatever the user had written.
@@ -186,6 +207,11 @@ export function AnnotationOverlay({
     if (!canDraw) return;
 
     if (tool === 'text') {
+      // Cancels the browser's native mousedown default action (focus
+      // shift / potential text-selection start) — see the comment on the
+      // focus useEffect above for why this matters specifically on
+      // desktop/mouse input.
+      e.preventDefault();
       // Placing a second text box while one is still open commits the
       // first instead of discarding it.
       commitTextEditor();
@@ -256,7 +282,7 @@ export function AnnotationOverlay({
           onPointerDown={(e) => e.stopPropagation()}
         >
           <input
-            autoFocus
+            ref={textInputRef}
             type="text"
             value={textEditor.value}
             maxLength={TEXT_MAX_LENGTH}
