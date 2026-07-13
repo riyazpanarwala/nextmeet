@@ -94,3 +94,26 @@
   .annot-btn { min-width: 30px; height: 28px; padding: 0 8px; font-size: 11px; }
   .annot-target-select { max-width: 120px; height: 28px; font-size: 11px; }
 }
+
+/* ─── Text annotation input (click-to-place + type) ─── */
+.annotation-text-editor {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-2px, -2px);
+}
+.annotation-text-editor input {
+  min-width: 140px;
+  max-width: 320px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1.5px solid currentColor;
+  background: rgba(15, 23, 42, 0.85);
+  color: inherit;
+  font-size: 14px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.annotation-text-editor input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}

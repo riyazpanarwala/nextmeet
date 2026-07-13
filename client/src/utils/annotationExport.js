@@ -1,5 +1,6 @@
 const STROKE_WIDTH = 3;
 const ARROW_HEAD_LEN = 12;
+const TEXT_FONT_SIZE = 18;
 
 function escapeXml(value) {
   return String(value ?? '')
@@ -35,6 +36,13 @@ function downloadBlob(blob, fileName) {
 
 function shapeToSvg(shape, width, height) {
   const color = escapeXml(shape.color || '#ef4444');
+
+  if (shape.tool === 'text') {
+    if (!shape.text) return '';
+    const x = shape.x * width;
+    const y = shape.y * height;
+    return `<text x="${x}" y="${y}" fill="${color}" font-size="${TEXT_FONT_SIZE}" font-family="Arial, sans-serif" dominant-baseline="hanging">${escapeXml(shape.text)}</text>`;
+  }
 
   if (shape.tool === 'pen' || shape.tool === 'highlighter') {
     const points = (shape.points || []).map((p) => `${p.x * width},${p.y * height}`).join(' ');
@@ -124,6 +132,28 @@ function pdfLine(x1, y1, x2, y2) {
 
 function shapeToPdf(shape, width, height) {
   const { r, g, b } = hexToRgb(shape.color);
+
+  if (shape.tool === 'text') {
+    if (!shape.text) return '';
+    const x = shape.x * width;
+    // PDF text draws from its baseline upward, and PDF's y-axis increases
+    // upward (unlike the top-left-origin, downward y-axis used everywhere
+    // else in this file). Subtracting the font size from the flipped y
+    // approximates the same "text hangs below the click point" look as
+    // the SVG version's dominant-baseline="hanging".
+    const y = (height - (shape.y * height)) - TEXT_FONT_SIZE;
+    return [
+      'q',
+      `${(r / 255).toFixed(3)} ${(g / 255).toFixed(3)} ${(b / 255).toFixed(3)} rg`,
+      'BT',
+      `/F1 ${TEXT_FONT_SIZE} Tf`,
+      `${x.toFixed(2)} ${y.toFixed(2)} Td`,
+      `(${pdfEscape(shape.text)}) Tj`,
+      'ET',
+      'Q',
+    ].join('\n');
+  }
+
   const color = `${(r / 255).toFixed(3)} ${(g / 255).toFixed(3)} ${(b / 255).toFixed(3)} RG`;
   const base = [`q`, color, `${shape.tool === 'highlighter' ? STROKE_WIDTH * 4 : STROKE_WIDTH} w`, '1 J 1 j'];
 

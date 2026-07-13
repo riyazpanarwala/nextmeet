@@ -14,6 +14,7 @@ import { WhiteboardPanel } from './WhiteboardPanel';
 import { downloadAnnotationPdf, downloadAnnotationPng } from '../utils/annotationExport';
 import { useMeetingTimer, formatElapsed } from '../hooks/useMeetingTimer';
 import { ThemeToggle } from './ThemeToggle';
+import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 
 const MAX_SCREEN_SHARES = 2;
 
@@ -55,6 +56,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   });
   const [pinnedParticipantId, setPinnedParticipantId] = useState('');
   const [pipParticipantId, setPipParticipantId] = useState('');
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // ── Annotation (screen-share drawing, sharer-only) ───────────────
   const [annotationTool, setAnnotationTool] = useState(null); // 'pen' | 'arrow' | 'rect' | 'circle' | null
@@ -98,6 +100,12 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   const remoteParticipantsRef = useRef(remoteParticipants);
   useEffect(() => { remoteParticipantsRef.current = remoteParticipants; }, [remoteParticipants]);
   const isScreenSharingRef = useRef(false);
+
+  // Always-fresh recording source — read imperatively by useRecording's
+  // rAF loop every frame, so joins/leaves/device-switches show up live
+  // instead of being frozen at whatever the list looked like when
+  // "Start Recording" was clicked.
+  const recordingParticipantsRef = useRef([]);
 
   const playMeetingTone = useCallback((type) => {
     if (!joinLeaveSoundsEnabledRef.current) return;
@@ -948,10 +956,14 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       } else if (key === 'w') {
         event.preventDefault();
         handleToggleWhiteboard();
+      } else if (key === '?') {
+        event.preventDefault();
+        setShowShortcuts((s) => !s);
       } else if (event.key === 'Escape') {
         setShowChat(false);
         setShowParticipants(false);
         setShowRecording(false);
+        setShowShortcuts(false);
         if (whiteboard.isOpen) whiteboard.setOpen(false);
       }
     };
@@ -1114,6 +1126,13 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       };
     }),
   ];
+  recordingParticipantsRef.current = [...screenTiles, ...allParticipants].map((p) => ({
+    key: p.socketId,
+    name: p.name,
+    stream: p.stream,
+    isLocal: p.isLocal,
+  }));
+
   const peerIds = allParticipants.filter((p) => !p.isLocal).map((p) => p.socketId);
   const connectionQualityByPeer = useConnectionQuality(peerConnections, peerIds);
   const validPinnedParticipantId = allParticipants.some((p) => p.socketId === pinnedParticipantId)
@@ -1262,6 +1281,15 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
             onClick={handleCopyInviteLink}
           >
             Copy Link
+          </button>
+          <button
+            type="button"
+            className="shortcuts-help-btn"
+            onClick={() => setShowShortcuts((s) => !s)}
+            title="Keyboard shortcuts"
+            aria-label="Keyboard shortcuts"
+          >
+            ?
           </button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
@@ -1473,15 +1501,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
             duration={recordingDuration}
             lastBlob={lastBlob}
             participantCount={count}
-            onStart={() =>
-              startRecording(
-                [...screenTiles, ...allParticipants].map((p) => ({
-                  name: p.name,
-                  stream: p.stream,
-                  isLocal: p.isLocal,
-                }))
-              )
-            }
+            onStart={() => startRecording(() => recordingParticipantsRef.current)}
             onStop={stopRecording}
             onDownload={() => downloadRecording(`nexmeet-${localInfo.roomId}-${Date.now()}.webm`)}
             onDismiss={clearRecording}
@@ -1525,6 +1545,10 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
         onSwitchVideo={handleSwitchVideoDevice}
         onSwitchSpeaker={setSpeakerDevice}
       />
+
+      {showShortcuts && (
+        <KeyboardShortcutsModal onClose={() => setShowShortcuts(false)} />
+      )}
     </div>
   );
 }

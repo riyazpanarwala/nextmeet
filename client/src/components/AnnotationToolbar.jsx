@@ -5,6 +5,7 @@ const TOOLS = [
   { id: 'arrow', label: 'Arrow' },
   { id: 'rect', label: 'Box' },
   { id: 'circle', label: 'Circle' },
+  { id: 'text', label: 'Text' },
 ];
 
 const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#f1f5f9'];

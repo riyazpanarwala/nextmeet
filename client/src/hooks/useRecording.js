@@ -7,8 +7,29 @@ import { useRef, useState, useCallback } from 'react';
  * each participant's <video> element into a grid. This gives a single
  * mixed-down recording that includes all participants visible on screen.
  *
- * Audio: We mix all MediaStream audio tracks via the Web Audio API into
- * one destination node, then add that audio track to the canvas stream.
+ * LIVE SOURCE: startRecording() takes a GETTER FUNCTION, not a fixed array.
+ * The compositor calls it every frame and reconciles against whatever it
+ * returns. This matters because a fixed snapshot goes stale the moment
+ * anything changes mid-recording:
+ *   - Local device switches (mic/camera) replace localStream with a brand
+ *     new MediaStream object — a frozen snapshot keeps pointing at the old
+ *     one, whose tracks just got stopped, so that tile freezes/blacks out.
+ *   - A participant joining, leaving, or starting/stopping a screen share
+ *     after recording started wouldn't show up in a fixed array at all.
+ * Reconciling by a stable per-participant `key` (socketId, or
+ * `${socketId}-screen` for shares) — rather than by stream id — lets the
+ * same tile "slot" survive its underlying stream object being swapped out.
+ *
+ * We also own dedicated OFFSCREEN <video> elements per participant, rather
+ * than searching the visible DOM for a matching tile. This avoids matching
+ * the wrong element when a participant is duplicated into the floating PiP
+ * window, and avoids losing the match entirely when a tile remounts due to
+ * pin/spotlight layout changes.
+ *
+ * Audio: each participant's audio track(s) are connected into a shared Web
+ * Audio mix destination via a MediaStreamAudioSourceNode per key, rebuilt
+ * whenever that key's stream object changes, and disconnected when the
+ * key drops out of the live participant list.
  */
 export function useRecording() {
   const [isRecording, setIsRecording] = useState(false);
@@ -23,38 +44,175 @@ export function useRecording() {
   const audioCtxRef = useRef(null);
   const destinationRef = useRef(null);
   const startTimeRef = useRef(null);
+  // Always-current "get the live participant list" function, supplied by
+  // the caller and re-read every frame — see startRecording().
+  const getParticipantsRef = useRef(() => []);
+  // key -> offscreen <video> element dedicated to recording.
+  const recordingVideoElsRef = useRef({});
+  // key -> { streamId, source } for the Web Audio graph.
+  const audioSourcesRef = useRef({});
 
-  // ── Mix all active audio streams into one Web Audio destination ──
-  const buildAudioMix = useCallback((streams) => {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const destination = ctx.createMediaStreamDestination();
+  // Creates/repoints/removes hidden <video> elements so they always match
+  // the current participant list, keyed by a stable identity (not stream
+  // id, since a participant's stream object can change under the same
+  // key — e.g. a local device switch).
+  const syncOffscreenVideoEls = useCallback((participants) => {
+    const map = recordingVideoElsRef.current;
+    const seenKeys = new Set();
 
-    streams.forEach((stream) => {
-      const audioTracks = stream.getAudioTracks();
-      if (audioTracks.length === 0) return;
+    participants.forEach((participant) => {
+      const { key, stream } = participant;
+      if (!key) return;
+      seenKeys.add(key);
+
+      if (!stream) {
+        // No stream right now — drop any stale element so the compositor
+        // falls back to the avatar tile instead of a frozen last frame.
+        const existing = map[key];
+        if (existing) {
+          existing.pause();
+          existing.srcObject = null;
+          existing.remove();
+          delete map[key];
+        }
+        return;
+      }
+
+      const existing = map[key];
+      if (existing) {
+        if (existing.srcObject !== stream) {
+          // Same participant, new stream object (e.g. local device switch)
+          // — repoint the existing element instead of leaving it frozen
+          // on the old, now-stopped tracks.
+          existing.srcObject = stream;
+          existing.play().catch(() => { });
+        }
+        return;
+      }
+
+      const videoEl = document.createElement('video');
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.autoplay = true;
+      videoEl.style.position = 'fixed';
+      videoEl.style.left = '-9999px';
+      videoEl.style.top = '-9999px';
+      videoEl.style.width = '2px';
+      videoEl.style.height = '2px';
+      videoEl.style.opacity = '0';
+      videoEl.style.pointerEvents = 'none';
+      videoEl.srcObject = stream;
+      document.body.appendChild(videoEl);
+      videoEl.play().catch((e) => {
+        console.warn('[Recording] Offscreen video play() failed:', e);
+      });
+      map[key] = videoEl;
+    });
+
+    // Remove elements for keys no longer present (left the room, stopped
+    // screen sharing, etc.)
+    Object.keys(map).forEach((key) => {
+      if (!seenKeys.has(key)) {
+        map[key].pause();
+        map[key].srcObject = null;
+        map[key].remove();
+        delete map[key];
+      }
+    });
+  }, []);
+
+  const teardownOffscreenVideoEls = useCallback(() => {
+    Object.values(recordingVideoElsRef.current).forEach((videoEl) => {
+      try {
+        videoEl.pause();
+        videoEl.srcObject = null;
+        videoEl.remove();
+      } catch (e) {
+        // Element may already be detached — safe to ignore.
+      }
+    });
+    recordingVideoElsRef.current = {};
+  }, []);
+
+  // Same reconciliation idea as syncOffscreenVideoEls, but for the Web
+  // Audio graph: connects a MediaStreamAudioSourceNode per key, rebuilds
+  // it if that key's stream object changes, and disconnects it if the key
+  // drops out or loses its audio track(s).
+  const syncAudioSources = useCallback((participants) => {
+    const ctx = audioCtxRef.current;
+    const destination = destinationRef.current;
+    if (!ctx || !destination) return;
+
+    const map = audioSourcesRef.current;
+    const seenKeys = new Set();
+
+    participants.forEach((participant) => {
+      const { key, stream } = participant;
+      if (!key) return;
+      seenKeys.add(key);
+
+      const audioTracks = stream ? stream.getAudioTracks() : [];
+      const existing = map[key];
+
+      if (audioTracks.length === 0) {
+        if (existing) {
+          try { existing.source.disconnect(); } catch (e) { /* already disconnected */ }
+          delete map[key];
+        }
+        return;
+      }
+
+      if (existing && existing.streamId === stream.id) {
+        return; // already wired up correctly
+      }
+
+      if (existing) {
+        try { existing.source.disconnect(); } catch (e) { /* already disconnected */ }
+      }
       try {
         const source = ctx.createMediaStreamSource(stream);
         source.connect(destination);
+        map[key] = { streamId: stream.id, source };
       } catch (e) {
         console.warn('[Recording] Could not connect audio source:', e);
       }
     });
 
-    audioCtxRef.current = ctx;
-    destinationRef.current = destination;
-    return destination.stream;
+    Object.keys(map).forEach((key) => {
+      if (!seenKeys.has(key)) {
+        try { map[key].source.disconnect(); } catch (e) { /* already disconnected */ }
+        delete map[key];
+      }
+    });
   }, []);
 
-  const startRecording = useCallback(async (participantStreams) => {
+  // `participantsSource` is expected to be a function returning the
+  // current array of { key, name, stream, isLocal }. A plain array is
+  // still accepted for backward compatibility, but won't update live.
+  const startRecording = useCallback(async (participantsSource) => {
     if (isRecording) return;
 
-    // participantStreams: [{ name, stream, isLocal }]
-    const activeStreams = participantStreams.filter((p) => p.stream);
+    const getParticipants = typeof participantsSource === 'function'
+      ? participantsSource
+      : () => participantsSource;
 
-    if (activeStreams.length === 0) {
+    const initialParticipants = (getParticipants() || []).filter((p) => p.stream);
+    if (initialParticipants.length === 0) {
       console.warn('[Recording] No streams to record');
       return;
     }
+
+    getParticipantsRef.current = getParticipants;
+
+    // ── Audio context + shared mix destination ──
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const destination = ctx.createMediaStreamDestination();
+    audioCtxRef.current = ctx;
+    destinationRef.current = destination;
+    audioSourcesRef.current = {};
+
+    syncOffscreenVideoEls(initialParticipants);
+    syncAudioSources(initialParticipants);
 
     // ── Create canvas ──
     const canvas = document.createElement('canvas');
@@ -65,27 +223,30 @@ export function useRecording() {
 
     // ── Composite loop — draw all video tiles at ~30fps ──
     const draw = () => {
-      const count = activeStreams.length;
+      const participants = (getParticipantsRef.current() || []).filter((p) => p.key);
+
+      // Reconcile against whoever is actually here right now — joins,
+      // leaves, screen-share starts/stops, and local device switches all
+      // show up on the next frame instead of freezing or dropping out.
+      syncOffscreenVideoEls(participants);
+      syncAudioSources(participants);
+
+      const count = participants.length;
       const cols = count === 1 ? 1 : count <= 4 ? 2 : 3;
-      const rows = Math.ceil(count / cols);
+      const rows = Math.ceil(count / cols) || 1;
       const tileW = canvas.width / cols;
       const tileH = canvas.height / rows;
 
       ctx2d.fillStyle = '#0a0d14';
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Find all <video> elements in the DOM and match by stream
-      const videoEls = Array.from(document.querySelectorAll('video'));
-
-      activeStreams.forEach((participant, i) => {
+      participants.forEach((participant, i) => {
         const col = i % cols;
         const row = Math.floor(i / cols);
         const x = col * tileW;
         const y = row * tileH;
 
-        const videoEl = videoEls.find(
-          (v) => v.srcObject && v.srcObject.id === participant.stream?.id
-        );
+        const videoEl = recordingVideoElsRef.current[participant.key];
 
         if (videoEl && videoEl.readyState >= 2) {
           try {
@@ -141,12 +302,9 @@ export function useRecording() {
 
     draw();
 
-    // ── Mix audio from all streams ──
-    const audioMixStream = buildAudioMix(activeStreams.map((p) => p.stream));
-
     // ── Combine canvas video + mixed audio ──
     const canvasStream = canvas.captureStream(30);
-    const audioTrack = audioMixStream.getAudioTracks()[0];
+    const audioTrack = destination.stream.getAudioTracks()[0];
     if (audioTrack) canvasStream.addTrack(audioTrack);
 
     // ── Start MediaRecorder ──
@@ -182,7 +340,7 @@ export function useRecording() {
     timerRef.current = setInterval(() => {
       setRecordingDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, 1000);
-  }, [isRecording, buildAudioMix]);
+  }, [isRecording, syncOffscreenVideoEls, syncAudioSources]);
 
   const stopRecording = useCallback(() => {
     if (!isRecording) return;
@@ -194,13 +352,20 @@ export function useRecording() {
     cancelAnimationFrame(rafRef.current);
     clearInterval(timerRef.current);
 
+    Object.values(audioSourcesRef.current).forEach(({ source }) => {
+      try { source.disconnect(); } catch (e) { /* already disconnected */ }
+    });
+    audioSourcesRef.current = {};
+
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
     destinationRef.current = null;
     canvasRef.current = null;
+    teardownOffscreenVideoEls();
+    getParticipantsRef.current = () => [];
 
     setIsRecording(false);
-  }, [isRecording]);
+  }, [isRecording, teardownOffscreenVideoEls]);
 
   const downloadRecording = useCallback((fileName) => {
     if (!lastBlob) return;

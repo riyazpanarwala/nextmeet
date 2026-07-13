@@ -46,6 +46,13 @@ export function VideoTile({
     .toUpperCase()
     .slice(0, 2);
 
+  // Mirror only the local user's own camera tile — matches the lobby preview
+  // and how every other conferencing app shows your own self-view. Screen
+  // shares and remote tiles must NEVER mirror (a remote participant's mirror
+  // state has nothing to do with what we render on our end, and mirroring a
+  // shared screen would make any on-screen text unreadable).
+  const isMirrored = isLocal && !isScreenShare;
+
   return (
     <div
       className={`video-tile ${isSpeaking ? 'speaking' : ''} ${isScreenShare ? 'screen-share' : ''}`}
@@ -141,6 +148,7 @@ export function VideoTile({
         autoPlay
         playsInline
         muted={isLocal}
+        className={isMirrored ? 'mirrored' : ''}
         style={{ opacity: participant?.isVideoOff && !isScreenShare ? 0 : 1 }}
       />
 

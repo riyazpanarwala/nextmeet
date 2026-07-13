@@ -447,6 +447,9 @@ select option { background: var(--surface2); }
   object-fit: cover;
   display: block;
 }
+.video-tile video.mirrored {
+  transform: scaleX(-1);
+}
 /* Screen shares must never crop — letterbox instead so nothing (like the
    top/bottom of the shared screen) gets cut off, regardless of how the
    container's aspect ratio compares to the actual screen being shared. */
@@ -2367,3 +2370,74 @@ select option { background: var(--surface2); }
   opacity: 1;
   transition: background 0.15s, border-color 0.15s;
 }
+
+/* ── Keyboard shortcuts modal ─────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+.shortcuts-modal {
+  width: min(360px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+.shortcuts-list {
+  list-style: none;
+  padding: 8px 20px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.shortcuts-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.shortcuts-list kbd {
+  min-width: 28px;
+  padding: 3px 8px;
+  text-align: center;
+  border-radius: 6px;
+  border: 1px solid var(--border-hi);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+}
+.shortcuts-list span {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.shortcuts-hint {
+  padding: 12px 20px 18px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.shortcuts-help-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface2);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+.shortcuts-help-btn:hover { border-color: var(--accent); color: var(--accent); }

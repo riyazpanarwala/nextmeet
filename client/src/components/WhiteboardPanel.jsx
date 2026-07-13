@@ -5,6 +5,8 @@ import { downloadAnnotationPdf, downloadAnnotationPng } from '../utils/annotatio
 
 const STROKE_WIDTH = 3;
 const ARROW_HEAD_LEN = 12;
+const TEXT_FONT_SIZE = 18;
+const TEXT_MAX_LENGTH = 300;
 
 function renderShape(shape, w, h) {
   const { tool, color, id } = shape;
@@ -56,6 +58,23 @@ function renderShape(shape, w, h) {
       </g>
     );
   }
+  if (tool === 'text') {
+    if (!shape.text) return null;
+    return (
+      <text
+        key={id}
+        x={shape.x * w}
+        y={shape.y * h}
+        fill={color}
+        fontSize={TEXT_FONT_SIZE}
+        fontFamily="'DM Sans', sans-serif"
+        dominantBaseline="hanging"
+        style={{ whiteSpace: 'pre' }}
+      >
+        {shape.text}
+      </text>
+    );
+  }
   return null;
 }
 
@@ -75,6 +94,10 @@ export function WhiteboardPanel({
   const drawingRef = useRef(null);
   const [size, setSize] = useState({ width: 1, height: 1 });
   const [liveShape, setLiveShape] = useState(null);
+  // Same click-to-place + type model as AnnotationOverlay's text tool —
+  // see the comment there for why it needs separate state from the
+  // drag-based tools.
+  const [textEditor, setTextEditor] = useState(null); // { x, y, value }
 
   useEffect(() => {
     const board = boardRef.current;
@@ -97,8 +120,40 @@ export function WhiteboardPanel({
     };
   }, []);
 
+  const commitTextEditor = useCallback(() => {
+    setTextEditor((current) => {
+      if (current && current.value.trim()) {
+        onAddShape({
+          tool: 'text',
+          color,
+          x: current.x,
+          y: current.y,
+          text: current.value.trim().slice(0, TEXT_MAX_LENGTH),
+        });
+      }
+      return null;
+    });
+  }, [onAddShape, color]);
+
+  const cancelTextEditor = useCallback(() => setTextEditor(null), []);
+
+  useEffect(() => {
+    if (tool !== 'text' && textEditor) {
+      commitTextEditor();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
+
   const handlePointerDown = useCallback((event) => {
     if (!tool) return;
+
+    if (tool === 'text') {
+      commitTextEditor();
+      const point = pointFromEvent(event);
+      setTextEditor({ x: point.x, y: point.y, value: '' });
+      return;
+    }
+
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const point = pointFromEvent(event);
     const shape = tool === 'pen' || tool === 'highlighter'
@@ -106,7 +161,7 @@ export function WhiteboardPanel({
       : { tool, color, x1: point.x, y1: point.y, x2: point.x, y2: point.y };
     drawingRef.current = shape;
     setLiveShape(shape);
-  }, [color, pointFromEvent, tool]);
+  }, [color, pointFromEvent, tool, commitTextEditor]);
 
   const handlePointerMove = useCallback((event) => {
     if (!drawingRef.current) return;
@@ -165,6 +220,7 @@ export function WhiteboardPanel({
       <div
         ref={boardRef}
         className={`whiteboard-canvas ${tool ? 'drawing' : ''}`}
+        style={tool === 'text' ? { cursor: 'text' } : undefined}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishShape}
@@ -173,6 +229,37 @@ export function WhiteboardPanel({
         <svg width={size.width} height={size.height}>
           {allShapes.map((shape) => renderShape(shape, size.width, size.height))}
         </svg>
+
+        {textEditor && (
+          <div
+            className="annotation-text-editor"
+            style={{
+              left: textEditor.x * size.width,
+              top: textEditor.y * size.height,
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <input
+              autoFocus
+              type="text"
+              value={textEditor.value}
+              maxLength={TEXT_MAX_LENGTH}
+              placeholder="Type annotation…"
+              style={{ color }}
+              onChange={(e) => setTextEditor((cur) => (cur ? { ...cur, value: e.target.value } : cur))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitTextEditor();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelTextEditor();
+                }
+              }}
+              onBlur={commitTextEditor}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

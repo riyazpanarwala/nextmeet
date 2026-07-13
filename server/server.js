@@ -7,18 +7,30 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Moved above the Server() call so it can size maxHttpBufferSize correctly —
+// see SOCKET_MAX_BUFFER_BYTES below.
+const MAX_CHAT_FILE_BYTES = 5 * 1024 * 1024;
+
+// Base64 inflates raw bytes by ~1.37x, and the actual Socket.IO frame also
+// carries the JSON envelope (message text up to 2000 chars, replyTo, room id,
+// event name, etc.) plus the "data:<mime>;base64," prefix. Socket.IO's
+// default maxHttpBufferSize (1MB) silently disconnects the socket — with no
+// error surfaced to the client — for any file over ~730KB raw. This sizes
+// the buffer to comfortably cover a full 5MB file plus that overhead.
+const SOCKET_MAX_BUFFER_BYTES = Math.ceil(MAX_CHAT_FILE_BYTES * 1.5) + 64 * 1024;
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
   },
+  maxHttpBufferSize: SOCKET_MAX_BUFFER_BYTES,
 });
 
 // roomId -> Map<socketId, { name, isHost, isMuted, isVideoOff, handRaised }>
 const rooms = new Map();
 const MAX_PARTICIPANTS = 6;
-const MAX_CHAT_FILE_BYTES = 5 * 1024 * 1024;
 
 // roomId -> { locked: boolean, password: string }
 const roomSecurity = new Map();
@@ -443,11 +455,11 @@ io.on('connection', (socket) => {
       file: safeFile,
       replyTo: replyTo
         ? {
-            id: String(replyTo.id || '').slice(0, 160),
-            name: String(replyTo.name || 'Participant').slice(0, 80),
-            message: String(replyTo.message || '').slice(0, 180),
-            fileName: String(replyTo.fileName || '').slice(0, 120),
-          }
+          id: String(replyTo.id || '').slice(0, 160),
+          name: String(replyTo.name || 'Participant').slice(0, 80),
+          message: String(replyTo.message || '').slice(0, 180),
+          fileName: String(replyTo.fileName || '').slice(0, 120),
+        }
         : null,
       reactions: {},
       timestamp: new Date().toISOString(),

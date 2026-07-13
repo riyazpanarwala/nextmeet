@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const STROKE_WIDTH = 3;
 const ARROW_HEAD_LEN = 12;
+const TEXT_FONT_SIZE = 18;
+const TEXT_MAX_LENGTH = 300;
 
 // Computes the letterboxed content rect (in pixels, relative to `container`)
 // that the video actually occupies given object-fit: contain. Every viewer
@@ -78,6 +80,23 @@ function renderShape(shape, w, h) {
       </g>
     );
   }
+  if (tool === 'text') {
+    if (!shape.text) return null;
+    return (
+      <text
+        key={id}
+        x={shape.x * w}
+        y={shape.y * h}
+        fill={color}
+        fontSize={TEXT_FONT_SIZE}
+        fontFamily="'DM Sans', sans-serif"
+        dominantBaseline="hanging"
+        style={{ whiteSpace: 'pre' }}
+      >
+        {shape.text}
+      </text>
+    );
+  }
   return null;
 }
 
@@ -93,6 +112,11 @@ export function AnnotationOverlay({
   const [rect, setRect] = useState(null);
   const drawingRef = useRef(null);
   const [liveShape, setLiveShape] = useState(null); // in-progress preview, not yet broadcast
+  // Text tool uses click-to-place + type instead of the click-drag-release
+  // model every other tool uses, so it gets its own small piece of state:
+  // the normalized position of the in-progress text box and its current
+  // (uncommitted) value.
+  const [textEditor, setTextEditor] = useState(null); // { x, y, value }
 
   const recalc = useCallback(() => {
     setRect(getContentRect(containerRef.current, videoRef.current));
@@ -128,8 +152,48 @@ export function AnnotationOverlay({
 
   const canDraw = isOwner && !!tool && !!rect;
 
+  // Commits whatever is currently in the text editor (if non-empty) as a
+  // finished shape, then closes the editor. Used on Enter, blur, and when
+  // starting a new text box while one is still open.
+  const commitTextEditor = useCallback(() => {
+    setTextEditor((current) => {
+      if (current && current.value.trim()) {
+        onAddShape({
+          tool: 'text',
+          color,
+          x: current.x,
+          y: current.y,
+          text: current.value.trim().slice(0, TEXT_MAX_LENGTH),
+        });
+      }
+      return null;
+    });
+  }, [onAddShape, color]);
+
+  const cancelTextEditor = useCallback(() => setTextEditor(null), []);
+
+  // If the tool changes away from 'text' (or access is revoked) while a
+  // text box is still being typed, commit it rather than silently losing
+  // whatever the user had written.
+  useEffect(() => {
+    if (tool !== 'text' && textEditor) {
+      commitTextEditor();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
+
   const handlePointerDown = useCallback((e) => {
     if (!canDraw) return;
+
+    if (tool === 'text') {
+      // Placing a second text box while one is still open commits the
+      // first instead of discarding it.
+      commitTextEditor();
+      const pt = pointFromEvent(e);
+      setTextEditor({ x: pt.x, y: pt.y, value: '' });
+      return;
+    }
+
     e.target.setPointerCapture?.(e.pointerId);
     const pt = pointFromEvent(e);
     let shape;
@@ -140,7 +204,7 @@ export function AnnotationOverlay({
     }
     drawingRef.current = shape;
     setLiveShape(shape);
-  }, [canDraw, tool, color, pointFromEvent]);
+  }, [canDraw, tool, color, pointFromEvent, commitTextEditor]);
 
   const handlePointerMove = useCallback((e) => {
     if (!drawingRef.current) return;
@@ -168,7 +232,7 @@ export function AnnotationOverlay({
     <div
       ref={containerRef}
       className="annotation-overlay-root"
-      style={{ cursor: canDraw ? 'crosshair' : 'default', pointerEvents: canDraw ? 'auto' : 'none' }}
+      style={{ cursor: canDraw ? (tool === 'text' ? 'text' : 'crosshair') : 'default', pointerEvents: canDraw ? 'auto' : 'none' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -181,6 +245,37 @@ export function AnnotationOverlay({
       >
         {allShapes.map((s) => renderShape(s, rect.width, rect.height))}
       </svg>
+
+      {textEditor && (
+        <div
+          className="annotation-text-editor"
+          style={{
+            left: rect.left + textEditor.x * rect.width,
+            top: rect.top + textEditor.y * rect.height,
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <input
+            autoFocus
+            type="text"
+            value={textEditor.value}
+            maxLength={TEXT_MAX_LENGTH}
+            placeholder="Type annotation…"
+            style={{ color }}
+            onChange={(e) => setTextEditor((cur) => (cur ? { ...cur, value: e.target.value } : cur))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitTextEditor();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelTextEditor();
+              }
+            }}
+            onBlur={commitTextEditor}
+          />
+        </div>
+      )}
     </div>
   );
 }
