@@ -32,6 +32,7 @@ export const CAPTION_LANGUAGES = [
 ];
 
 const STORAGE_KEY = 'nexmeet-caption-lang';
+const DISPLAY_STORAGE_KEY = 'nexmeet-caption-display-lang';
 
 export function getStoredCaptionLang() {
     try {
@@ -46,6 +47,25 @@ export function getStoredCaptionLang() {
 export function storeCaptionLang(code) {
     try {
         localStorage.setItem(STORAGE_KEY, code);
+    } catch {
+        // Ignore storage failures; the in-session choice still works.
+    }
+}
+
+// An empty value means captions remain in the language originally spoken.
+export function getStoredCaptionDisplayLang() {
+    try {
+        const stored = localStorage.getItem(DISPLAY_STORAGE_KEY);
+        if (stored === '' || CAPTION_LANGUAGES.some((l) => l.code === stored)) return stored;
+    } catch {
+        // Ignore storage failures (e.g. private browsing).
+    }
+    return '';
+}
+
+export function storeCaptionDisplayLang(code) {
+    try {
+        localStorage.setItem(DISPLAY_STORAGE_KEY, code);
     } catch {
         // Ignore storage failures; the in-session choice still works.
     }

@@ -11,6 +11,69 @@ app.use(express.json());
 // see SOCKET_MAX_BUFFER_BYTES below.
 const MAX_CHAT_FILE_BYTES = 5 * 1024 * 1024;
 
+// Hosted LibreTranslate endpoint. This intentionally remains configurable:
+// community mirrors have no uptime guarantee and some require an API key.
+const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL
+  || 'https://translate.terraprint.co/translate';
+const LIBRETRANSLATE_API_KEY = process.env.LIBRETRANSLATE_API_KEY || '';
+const TRANSLATE_TIMEOUT_MS = 5000;
+const MAX_TRANSLATION_CACHE = 500;
+const translationCache = new Map();
+
+// The browser speech API uses BCP-47 locale tags, while LibreTranslate uses
+// ISO 639 language codes. Keep this allow-list aligned with the client.
+const LIBRETRANSLATE_TARGETS = new Map([
+  ['en-US', 'en'], ['en-GB', 'en'], ['en-IN', 'en'],
+  ['es-ES', 'es'], ['es-MX', 'es'], ['fr-FR', 'fr'], ['de-DE', 'de'],
+  ['it-IT', 'it'], ['pt-BR', 'pt'], ['pt-PT', 'pt'], ['nl-NL', 'nl'],
+  ['hi-IN', 'hi'], ['gu-IN', 'gu'], ['ta-IN', 'ta'], ['te-IN', 'te'],
+  ['bn-IN', 'bn'], ['mr-IN', 'mr'], ['zh-CN', 'zh'], ['zh-TW', 'zh'],
+  ['ja-JP', 'ja'], ['ko-KR', 'ko'], ['ar-SA', 'ar'], ['ru-RU', 'ru'],
+  ['tr-TR', 'tr'], ['vi-VN', 'vi'], ['id-ID', 'id'], ['pl-PL', 'pl'],
+]);
+
+function getTranslationTarget(displayLang) {
+  return LIBRETRANSLATE_TARGETS.get(String(displayLang || '')) || '';
+}
+
+async function translateText(text, displayLang) {
+  const target = getTranslationTarget(displayLang);
+  if (!target) return null;
+
+  const key = `${target}::${text}`;
+  if (translationCache.has(key)) return translationCache.get(key);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
+  try {
+    const body = { q: text, source: 'auto', target, format: 'text' };
+    if (LIBRETRANSLATE_API_KEY) body.api_key = LIBRETRANSLATE_API_KEY;
+    const response = await fetch(LIBRETRANSLATE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`LibreTranslate responded ${response.status}`);
+    const data = await response.json();
+    const translated = typeof data?.translatedText === 'string'
+      ? data.translatedText.trim()
+      : '';
+    if (!translated) throw new Error('LibreTranslate returned no translatedText');
+
+    if (translationCache.size >= MAX_TRANSLATION_CACHE) {
+      translationCache.delete(translationCache.keys().next().value);
+    }
+    translationCache.set(key, translated);
+    return translated;
+  } catch (err) {
+    console.warn('[Translate] LibreTranslate request failed:', err.message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // Base64 inflates raw bytes by ~1.37x, and the actual Socket.IO frame also
 // carries the JSON envelope (message text up to 2000 chars, replyTo, room id,
 // event name, etc.) plus the "data:<mime>;base64," prefix. Socket.IO's
@@ -28,7 +91,7 @@ const io = new Server(server, {
   maxHttpBufferSize: SOCKET_MAX_BUFFER_BYTES,
 });
 
-// roomId -> Map<socketId, { name, isHost, isMuted, isVideoOff, handRaised }>
+// roomId -> Map<socketId, participant state including captionDisplayLang>
 const rooms = new Map();
 const MAX_PARTICIPANTS = 6;
 
@@ -167,6 +230,7 @@ function addParticipantToRoom(socket, { roomId, userName, isMuted = false, isVid
     isMuted: Boolean(isMuted),
     isVideoOff: Boolean(isVideoOff),
     handRaised: false,
+    captionDisplayLang: '',
     roomId,
   });
 
@@ -338,6 +402,7 @@ io.on('connection', (socket) => {
       isMuted: Boolean(isMuted),
       isVideoOff: Boolean(isVideoOff),
       handRaised: false,
+      captionDisplayLang: '',
       roomId,
     });
 
@@ -769,25 +834,68 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ─── LIVE CAPTIONS (Web Speech API, client-side transcription) ─
+  // ─── LIVE CAPTIONS + OPTIONAL PER-VIEWER TRANSLATION ─────────
   // The server never sees or stores audio — each client runs its own
   // browser's SpeechRecognition on its own mic and relays only the
-  // resulting text. This just fans that text out to the rest of the
-  // room, same shape as chat relay. Nothing is persisted.
-  socket.on('caption-text', ({ roomId, text, isFinal }) => {
+  // resulting text. Caption text is not persisted. When a viewer opts into
+  // translation, text is sent to the configured hosted LibreTranslate API.
+  socket.on('caption-text', async ({ roomId, text, isFinal, wantOwnTranslation }, callback) => {
+    const room = rooms.get(roomId);
+    const participant = room?.get(socket.id);
+    if (!participant) {
+      if (typeof callback === 'function') callback({});
+      return;
+    }
+
+    const safeText = String(text || '').trim().slice(0, 500);
+    if (!safeText) {
+      if (typeof callback === 'function') callback({});
+      return;
+    }
+
+    // Translate once per requested target language, then fan the result out
+    // to all recipients using that language.
+    const languageGroups = new Map();
+    for (const [id, data] of room.entries()) {
+      if (id === socket.id) continue;
+      const displayLang = getTranslationTarget(data.captionDisplayLang)
+        ? data.captionDisplayLang
+        : '';
+      if (!languageGroups.has(displayLang)) languageGroups.set(displayLang, []);
+      languageGroups.get(displayLang).push(id);
+    }
+
+    await Promise.all(Array.from(languageGroups.entries()).map(async ([displayLang, socketIds]) => {
+      const translatedText = displayLang
+        ? await translateText(safeText, displayLang)
+        : null;
+      for (const id of socketIds) {
+        io.to(id).emit('caption-text', {
+          socketId: socket.id,
+          name: participant.name || 'Participant',
+          text: safeText,
+          translatedText,
+          isFinal: Boolean(isFinal),
+        });
+      }
+    }));
+
+    if (typeof callback === 'function') {
+      const translatedText = wantOwnTranslation && participant.captionDisplayLang
+        ? await translateText(safeText, participant.captionDisplayLang)
+        : null;
+      callback({ translatedText });
+    }
+  });
+
+  socket.on('caption-display-lang-set', ({ roomId, lang }) => {
     const room = rooms.get(roomId);
     const participant = room?.get(socket.id);
     if (!participant) return;
 
-    const safeText = String(text || '').trim().slice(0, 500);
-    if (!safeText) return;
-
-    socket.to(roomId).emit('caption-text', {
-      socketId: socket.id,
-      name: participant.name || 'Participant',
-      text: safeText,
-      isFinal: Boolean(isFinal),
-    });
+    const requestedLang = String(lang || '');
+    const captionDisplayLang = getTranslationTarget(requestedLang) ? requestedLang : '';
+    room.set(socket.id, { ...participant, captionDisplayLang });
   });
 
   // ─── HOST CONTROLS ───────────────────────────────────────────

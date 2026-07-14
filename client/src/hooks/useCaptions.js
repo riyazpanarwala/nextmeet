@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CAPTION_LANGUAGES, getStoredCaptionLang, storeCaptionLang } from '../utils/captionLanguages';
+import {
+    CAPTION_LANGUAGES,
+    getStoredCaptionDisplayLang,
+    getStoredCaptionLang,
+    storeCaptionDisplayLang,
+    storeCaptionLang,
+} from '../utils/captionLanguages';
 
 const SpeechRecognitionImpl =
     typeof window !== 'undefined'
@@ -32,6 +38,7 @@ const CAPTION_LINGER_MS = 6000;
 export function useCaptions({ socket, roomId, localSocketId, localName }) {
     const [captionsEnabled, setCaptionsEnabled] = useState(false);
     const [captionLang, setCaptionLangState] = useState(getStoredCaptionLang);
+    const [captionDisplayLang, setCaptionDisplayLangState] = useState(getStoredCaptionDisplayLang);
     // socketId -> { name, text, isFinal, updatedAt }
     const [captionsBySpeaker, setCaptionsBySpeaker] = useState({});
 
@@ -50,9 +57,23 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
     // language change mid-session just needs a stop+start cycle (see
     // the effect below), not a whole new hook instance.
     const captionLangRef = useRef(captionLang);
+    const captionDisplayLangRef = useRef(captionDisplayLang);
     useEffect(() => { localSocketIdRef.current = localSocketId; }, [localSocketId]);
     useEffect(() => { localNameRef.current = localName; }, [localName]);
     useEffect(() => { captionLangRef.current = captionLang; }, [captionLang]);
+    useEffect(() => { captionDisplayLangRef.current = captionDisplayLang; }, [captionDisplayLang]);
+
+    // localSocketId changes after room admission, so this reaches the server
+    // after the participant record exists. Re-emit after reconnects as well.
+    useEffect(() => {
+        if (!socket || !localSocketId) return undefined;
+        const sendPreference = () => {
+            socket.emit('caption-display-lang-set', { roomId, lang: captionDisplayLang });
+        };
+        sendPreference();
+        socket.on('connect', sendPreference);
+        return () => socket.off('connect', sendPreference);
+    }, [socket, roomId, localSocketId, captionDisplayLang]);
 
     const removeCaptionAfterDelay = useCallback((socketId) => {
         clearTimeout(cleanupTimersRef.current[socketId]);
@@ -79,9 +100,9 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
     useEffect(() => {
         if (!socket) return undefined;
 
-        const onCaption = ({ socketId, name, text, isFinal }) => {
+        const onCaption = ({ socketId, name, text, translatedText, isFinal }) => {
             if (socketId === localSocketIdRef.current) return; // we render our own locally, instantly
-            applyCaptionLine(socketId, name, text, isFinal);
+            applyCaptionLine(socketId, name, translatedText || text, isFinal);
         };
 
         socket.on('caption-text', onCaption);
@@ -110,8 +131,23 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
             if (!text) return;
             const isFinal = Boolean(finalText);
 
+            // Show the original immediately, then replace it when an optional
+            // translation arrives. Provider failures never hide local text.
             applyCaptionLine(localSocketIdRef.current, localNameRef.current, text, isFinal);
-            socket?.emit('caption-text', { roomId, text, isFinal });
+            socket?.emit(
+                'caption-text',
+                { roomId, text, isFinal, wantOwnTranslation: Boolean(captionDisplayLangRef.current) },
+                (ack) => {
+                    if (ack?.translatedText) {
+                        applyCaptionLine(
+                            localSocketIdRef.current,
+                            localNameRef.current,
+                            ack.translatedText,
+                            isFinal,
+                        );
+                    }
+                },
+            );
         };
 
         recognition.onerror = (event) => {
@@ -195,6 +231,13 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
         }
     }, [startRecognition]);
 
+    const changeCaptionDisplayLang = useCallback((code) => {
+        if (code !== '' && !CAPTION_LANGUAGES.some((l) => l.code === code)) return;
+        setCaptionDisplayLangState(code);
+        storeCaptionDisplayLang(code);
+        captionDisplayLangRef.current = code;
+    }, []);
+
     // Full teardown on unmount (leaving the room, etc.)
     useEffect(() => {
         return () => {
@@ -216,5 +259,7 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
         captionLang,
         changeCaptionLang,
         captionLanguages: CAPTION_LANGUAGES,
+        captionDisplayLang,
+        changeCaptionDisplayLang,
     };
 }
