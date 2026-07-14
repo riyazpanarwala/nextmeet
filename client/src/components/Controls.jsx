@@ -249,28 +249,6 @@ export function Controls({
 
           <div className="ctrl-divider" />
 
-          {/* Raise hand — this bar copy is hidden on mobile via .mobile-overflow-action;
-            the More-panel copy below is the mobile-only fallback for it. */}
-          <button
-            className={`ctrl-btn mobile-overflow-action ${isHandRaised ? 'active-hand' : ''}`}
-            onClick={onToggleHand}
-            title={isHandRaised ? 'Lower hand' : 'Raise hand'}
-          >
-            <HandIcon />
-            <span className="mobile-label">{isHandRaised ? 'Lower' : 'Hand'}</span>
-          </button>
-
-          {/* Record */}
-          <button
-            className={`ctrl-btn mobile-overflow-action ${isRecording ? 'active-rec' : ''} ${showRecording ? 'active' : ''}`}
-            onClick={onToggleRecording}
-            title="Recording"
-          >
-            <RecordIcon active={isRecording} />
-            {isRecording && <span className="rec-badge-dot" />}
-            <span className="mobile-label">Rec</span>
-          </button>
-
           {/* Chat */}
           <button className={`ctrl-btn mobile-overflow-action ${showChat ? 'active' : ''}`} onClick={onToggleChat} title="Chat">
             <ChatIcon />
@@ -284,35 +262,11 @@ export function Controls({
             <span className="mobile-label">People</span>
           </button>
 
-          <button className={`ctrl-btn mobile-overflow-action ${showWhiteboard ? 'active' : ''}`} onClick={onToggleWhiteboard} title="Whiteboard">
-            <WhiteboardIcon />
-            <span className="mobile-label">Board</span>
-          </button>
-
-          {captionsSupported && (
-            <button
-              className={`ctrl-btn mobile-overflow-action ${captionsEnabled ? 'active-green' : ''}`}
-              onClick={onToggleCaptions}
-              title={captionsEnabled ? 'Turn off captions' : 'Turn on live captions'}
-            >
-              <CaptionsIcon />
-              <span className="mobile-label">{captionsEnabled ? 'CC on' : 'CC'}</span>
-            </button>
-          )}
-
-          {/* More — only meaningful once some of the bar buttons above collapse
-            out of view (tablet/mobile). Hidden entirely on desktop via CSS
-            (.more-btn), since every action it holds is already visible in
-            the bar there — showing it too was the duplicate-icon bug. */}
-          <button className={`ctrl-btn more-btn ${showMore ? 'active' : ''}`} onClick={handleMoreToggle} title="More">
+          {/* Less-frequent meeting and host actions live in one overflow menu. */}
+          <button className={`ctrl-btn more-btn ${showMore ? 'active' : ''} ${isRecording ? 'active-rec' : ''}`} onClick={handleMoreToggle} title="More controls">
             <MoreIcon />
+            {isRecording && <span className="rec-badge-dot" />}
             <span className="mobile-label">More</span>
-          </button>
-
-          {/* Settings — device settings: microphone, camera, speaker */}
-          <button className={`ctrl-btn ${showDeviceSettings ? 'active' : ''}`} onClick={handleDeviceSettingsToggle} title="Settings">
-            <SettingsIcon />
-            <span className="mobile-label">Settings</span>
           </button>
 
           <div className="ctrl-divider" />
@@ -324,30 +278,12 @@ export function Controls({
           </button>
         </div>
 
-        <div className="controls-right">
-          {canModerate && (
-            <button className="host-ctrl-btn" onClick={onToggleRoomLock} title={roomLocked ? 'Unlock meeting' : 'Lock meeting'}>
-              {roomLocked ? 'Unlock' : 'Lock'}
-            </button>
-          )}
-          {canModerate && (
-            <button className="host-ctrl-btn" onClick={onMuteAll} title="Mute all participants">
-              Mute All
-            </button>
-          )}
-          {canModerate && (
-            <button className="host-ctrl-btn danger" onClick={onEndMeeting} title="End meeting for everyone">
-              End
-            </button>
-          )}
-        </div>
+        <div className="controls-right" aria-hidden="true" />
       </div>
 
       {/* Both panels live outside the scrollable controls bar so mobile browsers do not clip them. */}
 
-      {/* "More" panel — each quick action below only becomes visible (via CSS
-        mirror-* classes) once its equivalent bar button has actually been
-        hidden at that breakpoint, so nothing is ever shown twice. */}
+      {/* "More" keeps the primary footer calm while preserving quick access. */}
       {showMore && (
         <div className="settings-panel">
           <div className="settings-panel-header">
@@ -429,6 +365,15 @@ export function Controls({
                 <span>{captionsEnabled ? 'Captions on' : 'Captions'}</span>
               </button>
             )}
+
+            <button
+              type="button"
+              className="settings-quick-btn mirror-settings"
+              onClick={handleDeviceSettingsToggle}
+            >
+              <SettingsIcon />
+              <span>Device settings</span>
+            </button>
 
             {/* Mute All is a fire-and-forget action, not a panel — no need to close More */}
             {canModerate && (

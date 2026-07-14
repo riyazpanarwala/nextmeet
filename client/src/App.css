@@ -2371,41 +2371,26 @@ select option { background: var(--surface2); }
 }
 /* ── More button & its panel: only relevant once bar buttons collapse ── */
 
-/* Desktop (>900px): every action in the More panel is already visible in
-   the bar (Hand/Rec/Chat/People aren't hidden until 600px, Mute All isn't
-   hidden until 900px) — so the More button itself has nothing to add. */
-.more-btn { display: none; }
-
-@media (max-width: 900px) {
-  .more-btn { display: flex; }
-}
-
-/* Quick actions inside the More panel default to hidden — they only turn
-   on once their bar equivalent has actually disappeared at that width,
-   so nothing is ever shown in both places at once. */
+/* Keep secondary meeting actions in one overflow menu at every width. */
+.more-btn,
 .settings-quick-btn.mirror-hand,
 .settings-quick-btn.mirror-rec,
-.settings-quick-btn.mirror-chat,
-.settings-quick-btn.mirror-people,
-.settings-quick-btn.mirror-board {
-  display: none;
-}
-
-/* Mute All (controls-right) is hidden the whole time the More button is
-   visible (both use the 900px breakpoint), so its mirror is always on
-   whenever the panel can be opened at all. */
-.settings-quick-btn.mirror-muteall {
+.settings-quick-btn.mirror-board,
+.settings-quick-btn.mirror-muteall,
+.settings-quick-btn.mirror-settings {
   display: flex;
 }
 
+/* Chat and People remain primary controls until the compact mobile layout. */
+.settings-quick-btn.mirror-chat,
+.settings-quick-btn.mirror-people {
+  display: none;
+}
+
 @media (max-width: 600px) {
-  /* Hand/Rec/Chat/People vanish from the bar here (.mobile-overflow-action),
-     so this is where their More-panel copies should appear. */
-  .settings-quick-btn.mirror-hand,
-  .settings-quick-btn.mirror-rec,
+  /* Chat and People move into More when their bar copies are hidden. */
   .settings-quick-btn.mirror-chat,
-  .settings-quick-btn.mirror-people,
-  .settings-quick-btn.mirror-board {
+  .settings-quick-btn.mirror-people {
     display: flex;
   }
 }
