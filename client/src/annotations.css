@@ -13,6 +13,9 @@
   position: static;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;      /* NEW */
+  flex-shrink: 0;         /* NEW */
+  width: max-content;     /* NEW — always size to content, never compress */
   gap: 6px;
   padding: 6px 8px;
   border-radius: 20px;
@@ -26,6 +29,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;         /* NEW — stop buttons compressing */
   min-width: 34px;
   height: 30px;
   padding: 0 10px;
@@ -33,6 +37,7 @@
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;    /* NEW — stop text wrapping inside the button */
   transition: all 0.15s;
 }
 .annot-btn:hover { background: var(--surface2); color: var(--text); }
@@ -48,6 +53,7 @@
 }
 
 .annot-divider {
+  flex-shrink: 0;         /* NEW */
   width: 1px;
   height: 20px;
   background: rgba(255,255,255,0.14);
@@ -55,6 +61,7 @@
 }
 
 .annot-target-select {
+  flex-shrink: 0;         /* NEW */
   height: 30px;
   max-width: 150px;
   border: 1px solid var(--border-hi);
@@ -69,9 +76,11 @@
 
 .annot-colors {
   display: flex;
+  flex-shrink: 0;         /* NEW */
   gap: 5px;
 }
 .annot-swatch {
+  flex-shrink: 0;         /* NEW */
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -84,13 +93,7 @@
   transform: scale(1.15);
 }
 
-/* Mobile: shrink and allow horizontal scroll instead of wrapping/overflowing */
 @media (max-width: 600px) {
-  .annotation-toolbar {
-    max-width: calc(100% - 16px);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
   .annot-btn { min-width: 30px; height: 28px; padding: 0 8px; font-size: 11px; }
   .annot-target-select { max-width: 120px; height: 28px; font-size: 11px; }
 }

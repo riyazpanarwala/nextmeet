@@ -618,7 +618,6 @@ select option { background: var(--surface2); }
 }
 .whiteboard-toolbar-wrap .annotation-toolbar {
   width: max-content;
-  max-width: 100%;
 }
 .whiteboard-canvas {
   position: relative;
