@@ -590,8 +590,8 @@ select option { background: var(--surface2); }
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px;
-  gap: 10px;
+  padding: 8px 12px 12px;
+  gap: 6px;             
   background: #0b1220;
 }
 .whiteboard-header {
@@ -601,9 +601,11 @@ select option { background: var(--surface2); }
   justify-content: space-between;
   gap: 12px;
   padding: 0 4px;
+  margin-bottom: -2px;
 }
 .whiteboard-header h2 {
   margin: 0;
+  line-height: 1.2;
   color: var(--text);
   font-family: var(--font-display);
   font-size: 16px;
@@ -841,7 +843,12 @@ select option { background: var(--surface2); }
   z-index: 20;
 }
 .controls-left  { min-width: 140px; }
-.controls-right { min-width: 140px; display: flex; justify-content: flex-end; }
+.controls-right {
+  min-width: 140px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .controls-center { display: flex; align-items: center; gap: 8px; }
 .room-time {
   font-size: 13px;
@@ -1135,7 +1142,7 @@ select option { background: var(--surface2); }
   border-radius: 8px;
   background: rgba(15,23,42,0.82);
   border: 1px solid rgba(255,255,255,0.14);
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(8px);
 }
 .tile-camera-actions button:hover,
