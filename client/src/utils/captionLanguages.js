@@ -31,6 +31,21 @@ export const CAPTION_LANGUAGES = [
     { code: 'pl-PL', label: 'Polish' },
 ];
 
+// Hosted LibreTranslate instances expose a smaller language set than the
+// browser's speech recognizer. Keep transcription languages above, but only
+// offer targets the configured public provider can actually translate into.
+const TRANSLATION_LANGUAGE_CODES = new Set([
+    'en-US', 'en-GB', 'en-IN',
+    'es-ES', 'es-MX', 'fr-FR', 'de-DE', 'it-IT',
+    'pt-BR', 'pt-PT', 'nl-NL', 'hi-IN', 'bn-IN',
+    'zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'ar-SA',
+    'ru-RU', 'tr-TR', 'vi-VN', 'id-ID', 'pl-PL',
+]);
+
+export const CAPTION_TRANSLATION_LANGUAGES = CAPTION_LANGUAGES.filter(
+    (language) => TRANSLATION_LANGUAGE_CODES.has(language.code),
+);
+
 const STORAGE_KEY = 'nexmeet-caption-lang';
 const DISPLAY_STORAGE_KEY = 'nexmeet-caption-display-lang';
 
@@ -56,7 +71,7 @@ export function storeCaptionLang(code) {
 export function getStoredCaptionDisplayLang() {
     try {
         const stored = localStorage.getItem(DISPLAY_STORAGE_KEY);
-        if (stored === '' || CAPTION_LANGUAGES.some((l) => l.code === stored)) return stored;
+        if (stored === '' || CAPTION_TRANSLATION_LANGUAGES.some((l) => l.code === stored)) return stored;
     } catch {
         // Ignore storage failures (e.g. private browsing).
     }

@@ -14,7 +14,7 @@ const MAX_CHAT_FILE_BYTES = 5 * 1024 * 1024;
 // Hosted LibreTranslate endpoint. This intentionally remains configurable:
 // community mirrors have no uptime guarantee and some require an API key.
 const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL
-  || 'https://translate.terraprint.co/translate';
+  || 'https://translate.fedilab.app/translate';
 const LIBRETRANSLATE_API_KEY = process.env.LIBRETRANSLATE_API_KEY || '';
 const TRANSLATE_TIMEOUT_MS = 5000;
 const MAX_TRANSLATION_CACHE = 500;
@@ -25,9 +25,9 @@ const translationCache = new Map();
 const LIBRETRANSLATE_TARGETS = new Map([
   ['en-US', 'en'], ['en-GB', 'en'], ['en-IN', 'en'],
   ['es-ES', 'es'], ['es-MX', 'es'], ['fr-FR', 'fr'], ['de-DE', 'de'],
-  ['it-IT', 'it'], ['pt-BR', 'pt'], ['pt-PT', 'pt'], ['nl-NL', 'nl'],
-  ['hi-IN', 'hi'], ['gu-IN', 'gu'], ['ta-IN', 'ta'], ['te-IN', 'te'],
-  ['bn-IN', 'bn'], ['mr-IN', 'mr'], ['zh-CN', 'zh'], ['zh-TW', 'zh'],
+  ['it-IT', 'it'], ['pt-BR', 'pt-BR'], ['pt-PT', 'pt'], ['nl-NL', 'nl'],
+  ['hi-IN', 'hi'], ['bn-IN', 'bn'],
+  ['zh-CN', 'zh-Hans'], ['zh-TW', 'zh-Hant'],
   ['ja-JP', 'ja'], ['ko-KR', 'ko'], ['ar-SA', 'ar'], ['ru-RU', 'ru'],
   ['tr-TR', 'tr'], ['vi-VN', 'vi'], ['id-ID', 'id'], ['pl-PL', 'pl'],
 ]);

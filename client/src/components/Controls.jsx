@@ -135,6 +135,7 @@ export function Controls({
   devices, selectedDevices, onSwitchAudio, onSwitchVideo, onSwitchSpeaker,
   captionsSupported = false, captionsEnabled = false, onToggleCaptions,
   captionLang = 'en-US', onChangeCaptionLang, captionLanguages = [],
+  captionTranslationLanguages = [],
   captionDisplayLang = '', onChangeCaptionDisplayLang,
 }) {
   // Two independent panels: "More" = meeting controls (raise hand, record,
@@ -504,7 +505,7 @@ export function Controls({
                 onChange={(e) => onChangeCaptionDisplayLang?.(e.target.value)}
               >
                 <option value="">Original language (no translation)</option>
-                {captionLanguages.map((l) => (
+                {captionTranslationLanguages.map((l) => (
                   <option key={l.code} value={l.code}>{l.label}</option>
                 ))}
               </select>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     CAPTION_LANGUAGES,
+    CAPTION_TRANSLATION_LANGUAGES,
     getStoredCaptionDisplayLang,
     getStoredCaptionLang,
     storeCaptionDisplayLang,
@@ -232,7 +233,7 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
     }, [startRecognition]);
 
     const changeCaptionDisplayLang = useCallback((code) => {
-        if (code !== '' && !CAPTION_LANGUAGES.some((l) => l.code === code)) return;
+        if (code !== '' && !CAPTION_TRANSLATION_LANGUAGES.some((l) => l.code === code)) return;
         setCaptionDisplayLangState(code);
         storeCaptionDisplayLang(code);
         captionDisplayLangRef.current = code;
@@ -259,6 +260,7 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
         captionLang,
         changeCaptionLang,
         captionLanguages: CAPTION_LANGUAGES,
+        captionTranslationLanguages: CAPTION_TRANSLATION_LANGUAGES,
         captionDisplayLang,
         changeCaptionDisplayLang,
     };
