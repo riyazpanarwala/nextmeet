@@ -38,10 +38,12 @@ function getTranslationTarget(displayLang) {
 
 async function translateText(text, displayLang) {
   const target = getTranslationTarget(displayLang);
-  if (!target) return null;
+  if (!target) return { translatedText: null, error: 'unsupported-language' };
 
   const key = `${target}::${text}`;
-  if (translationCache.has(key)) return translationCache.get(key);
+  if (translationCache.has(key)) {
+    return { translatedText: translationCache.get(key), error: null };
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
@@ -65,10 +67,13 @@ async function translateText(text, displayLang) {
       translationCache.delete(translationCache.keys().next().value);
     }
     translationCache.set(key, translated);
-    return translated;
+    return { translatedText: translated, error: null };
   } catch (err) {
     console.warn('[Translate] LibreTranslate request failed:', err.message);
-    return null;
+    const error = err.name === 'AbortError'
+      ? 'provider-timeout'
+      : 'provider-request-failed';
+    return { translatedText: null, error };
   } finally {
     clearTimeout(timeout);
   }
@@ -866,36 +871,54 @@ io.on('connection', (socket) => {
     }
 
     await Promise.all(Array.from(languageGroups.entries()).map(async ([displayLang, socketIds]) => {
-      const translatedText = displayLang
+      const translation = displayLang
         ? await translateText(safeText, displayLang)
-        : null;
+        : { translatedText: null, error: null };
       for (const id of socketIds) {
         io.to(id).emit('caption-text', {
           socketId: socket.id,
           name: participant.name || 'Participant',
           text: safeText,
-          translatedText,
+          translatedText: translation.translatedText,
+          translationError: translation.error,
           isFinal: Boolean(isFinal),
         });
       }
     }));
 
     if (typeof callback === 'function') {
-      const translatedText = wantOwnTranslation && participant.captionDisplayLang
+      const translation = wantOwnTranslation && participant.captionDisplayLang
         ? await translateText(safeText, participant.captionDisplayLang)
-        : null;
-      callback({ translatedText });
+        : {
+            translatedText: null,
+            error: wantOwnTranslation ? 'translation-language-not-set' : null,
+          };
+      callback({
+        translatedText: translation.translatedText,
+        translationError: translation.error,
+        displayLang: participant.captionDisplayLang || '',
+      });
     }
   });
 
-  socket.on('caption-display-lang-set', ({ roomId, lang }) => {
+  socket.on('caption-display-lang-set', ({ roomId, lang }, callback) => {
     const room = rooms.get(roomId);
     const participant = room?.get(socket.id);
-    if (!participant) return;
+    if (!participant) {
+      if (typeof callback === 'function') callback({ ok: false, error: 'not-in-room' });
+      return;
+    }
 
     const requestedLang = String(lang || '');
     const captionDisplayLang = getTranslationTarget(requestedLang) ? requestedLang : '';
     room.set(socket.id, { ...participant, captionDisplayLang });
+    if (typeof callback === 'function') {
+      callback({
+        ok: requestedLang === '' || captionDisplayLang === requestedLang,
+        lang: captionDisplayLang,
+        error: requestedLang && !captionDisplayLang ? 'unsupported-language' : null,
+      });
+    }
   });
 
   // ─── HOST CONTROLS ───────────────────────────────────────────

@@ -69,7 +69,15 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
     useEffect(() => {
         if (!socket || !localSocketId) return undefined;
         const sendPreference = () => {
-            socket.emit('caption-display-lang-set', { roomId, lang: captionDisplayLang });
+            socket.emit(
+                'caption-display-lang-set',
+                { roomId, lang: captionDisplayLang },
+                (ack) => {
+                    if (!ack?.ok) {
+                        console.warn('[Captions] Display language was not accepted:', ack?.error);
+                    }
+                },
+            );
         };
         sendPreference();
         socket.on('connect', sendPreference);
@@ -145,6 +153,13 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
                             localNameRef.current,
                             ack.translatedText,
                             isFinal,
+                        );
+                    } else if (ack?.translationError) {
+                        console.warn(
+                            '[Captions] Translation unavailable:',
+                            ack.translationError,
+                            'display language:',
+                            ack.displayLang || '(none)',
                         );
                     }
                 },
