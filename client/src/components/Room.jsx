@@ -81,6 +81,9 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
     captionsEnabled,
     captionsBySpeaker,
     toggleCaptions,
+    captionLang,
+    changeCaptionLang,
+    captionLanguages,
   } = useCaptions({
     socket,
     roomId: localInfo.roomId,
@@ -1585,6 +1588,9 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
         captionsSupported={captionsSupported}
         captionsEnabled={captionsEnabled}
         onToggleCaptions={toggleCaptions}
+        captionLang={captionLang}
+        onChangeCaptionLang={changeCaptionLang}
+        captionLanguages={captionLanguages}
       />
 
       {showShortcuts && (

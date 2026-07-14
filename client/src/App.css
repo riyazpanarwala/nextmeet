@@ -971,6 +971,12 @@ select option { background: var(--surface2); }
   color: var(--text-muted);
   margin-top: 4px;
 }
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-top: -4px;
+}
 .settings-action-btn {
   min-height: 42px;
   padding: 10px 12px;

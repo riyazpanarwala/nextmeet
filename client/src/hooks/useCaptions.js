@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CAPTION_LANGUAGES, getStoredCaptionLang, storeCaptionLang } from '../utils/captionLanguages';
 
 const SpeechRecognitionImpl =
     typeof window !== 'undefined'
@@ -30,6 +31,7 @@ const CAPTION_LINGER_MS = 6000;
  */
 export function useCaptions({ socket, roomId, localSocketId, localName }) {
     const [captionsEnabled, setCaptionsEnabled] = useState(false);
+    const [captionLang, setCaptionLangState] = useState(getStoredCaptionLang);
     // socketId -> { name, text, isFinal, updatedAt }
     const [captionsBySpeaker, setCaptionsBySpeaker] = useState({});
 
@@ -42,8 +44,15 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
     // instance (same pattern used throughout usePeerConnections/Room.jsx).
     const localSocketIdRef = useRef(localSocketId);
     const localNameRef = useRef(localName);
+    // recognition.lang is only read at .start() time — changing it on a
+    // live instance has no effect. startRecognition() reads this ref
+    // fresh each time it (re)creates the recognition object, so a
+    // language change mid-session just needs a stop+start cycle (see
+    // the effect below), not a whole new hook instance.
+    const captionLangRef = useRef(captionLang);
     useEffect(() => { localSocketIdRef.current = localSocketId; }, [localSocketId]);
     useEffect(() => { localNameRef.current = localName; }, [localName]);
+    useEffect(() => { captionLangRef.current = captionLang; }, [captionLang]);
 
     const removeCaptionAfterDelay = useCallback((socketId) => {
         clearTimeout(cleanupTimersRef.current[socketId]);
@@ -86,7 +95,7 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
         const recognition = new SpeechRecognitionImpl();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = 'en-US';
+        recognition.lang = captionLangRef.current;
 
         recognition.onresult = (event) => {
             let interimText = '';
@@ -167,6 +176,25 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
         });
     }, [startRecognition, stopRecognition]);
 
+    // Changing language while captions are live: stop the current
+    // recognition instance and start a fresh one with the new lang.
+    // Guarded so this never fires on mount or while captions are off.
+    const changeCaptionLang = useCallback((code) => {
+        if (!CAPTION_LANGUAGES.some((l) => l.code === code)) return;
+        setCaptionLangState(code);
+        storeCaptionLang(code);
+        captionLangRef.current = code;
+        if (shouldRunRef.current) {
+            const recognition = recognitionRef.current;
+            if (recognition) {
+                recognition.onend = null; // suppress the auto-restart in the OLD instance
+                try { recognition.stop(); } catch { /* already stopped */ }
+                recognitionRef.current = null;
+            }
+            startRecognition(); // picks up captionLangRef.current fresh
+        }
+    }, [startRecognition]);
+
     // Full teardown on unmount (leaving the room, etc.)
     useEffect(() => {
         return () => {
@@ -185,5 +213,8 @@ export function useCaptions({ socket, roomId, localSocketId, localName }) {
         captionsEnabled,
         captionsBySpeaker,
         toggleCaptions,
+        captionLang,
+        changeCaptionLang,
+        captionLanguages: CAPTION_LANGUAGES,
     };
 }

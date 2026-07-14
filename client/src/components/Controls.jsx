@@ -134,6 +134,7 @@ export function Controls({
   joinLeaveSoundsEnabled = true, onToggleJoinLeaveSounds,
   devices, selectedDevices, onSwitchAudio, onSwitchVideo, onSwitchSpeaker,
   captionsSupported = false, captionsEnabled = false, onToggleCaptions,
+  captionLang = 'en-US', onChangeCaptionLang, captionLanguages = [],
 }) {
   // Two independent panels: "More" = meeting controls (raise hand, record,
   // chat, people, mute all). "Settings" = device settings (mic/camera/speaker).
@@ -513,6 +514,24 @@ export function Controls({
               </option>
             ))}
           </select>
+
+          {captionsSupported && (
+            <>
+              <label htmlFor="caption-lang-select">Caption Language</label>
+              <select
+                id="caption-lang-select"
+                value={captionLang}
+                onChange={(e) => onChangeCaptionLang?.(e.target.value)}
+              >
+                {captionLanguages.map((l) => (
+                  <option key={l.code} value={l.code}>{l.label}</option>
+                ))}
+              </select>
+              <p className="settings-hint">
+                Sets the language your own speech is transcribed in — captions show as spoken, not translated.
+              </p>
+            </>
+          )}
 
           <button
             type="button"
