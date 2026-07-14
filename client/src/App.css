@@ -915,6 +915,15 @@ select option { background: var(--surface2); }
   transition: all 0.2s;
 }
 .host-ctrl-btn:hover { background: rgba(250,204,21,0.2); }
+.host-ctrl-btn.danger {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.12);
+  color: var(--red);
+}
+.host-ctrl-btn.danger:hover {
+  background: rgba(239,68,68,0.2);
+  border-color: var(--red);
+}
 
 /* Settings panel (used by both "More" meeting controls and Device Settings) */
 .settings-panel {
@@ -1025,6 +1034,16 @@ select option { background: var(--surface2); }
 .settings-quick-btn.active-rec {
   border-color: rgba(239,68,68,0.35);
   background: rgba(239,68,68,0.1);
+  color: var(--red);
+}
+.settings-quick-btn.danger {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.1);
+  color: var(--red);
+}
+.settings-quick-btn.danger:hover {
+  border-color: var(--red);
+  background: rgba(239,68,68,0.18);
   color: var(--red);
 }
 
@@ -1446,6 +1465,101 @@ select option { background: var(--surface2); }
 }
 
 /* ─── Participants Panel ─────────────────── */
+.waiting-room-section {
+  margin: 10px 12px 6px;
+  padding: 10px;
+  border: 1px solid rgba(250,204,21,0.2);
+  border-radius: var(--radius-sm);
+  background: rgba(250,204,21,0.06);
+}
+.waiting-room-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.waiting-room-title h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.waiting-room-title span {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(250,204,21,0.16);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.waiting-room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.waiting-request {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.waiting-request-info {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.waiting-request-info > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.waiting-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(59,130,246,0.18);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.waiting-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.waiting-actions button {
+  border: 1px solid rgba(34,197,94,0.35);
+  background: rgba(34,197,94,0.12);
+  color: #22c55e;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.waiting-actions button:hover { background: rgba(34,197,94,0.2); }
+.waiting-actions button.danger {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.12);
+  color: var(--red);
+}
+.waiting-actions button.danger:hover { background: rgba(239,68,68,0.2); }
 .participants-list {
   flex: 1;
   overflow-y: auto;
@@ -1489,6 +1603,7 @@ select option { background: var(--surface2); }
 }
 .participant-badges { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
 .badge-host { font-size: 9px; font-weight: 700; background: rgba(59,130,246,0.2); color: var(--accent); padding: 1px 6px; border-radius: 4px; text-transform: uppercase; }
+.badge-cohost { font-size: 9px; font-weight: 700; background: rgba(34,197,94,0.16); color: #22c55e; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; }
 .badge-hand { font-size: 9px; font-weight: 700; background: rgba(250,204,21,0.18); color: #fbbf24; padding: 1px 6px; border-radius: 4px; }
 .badge-muted { font-size: 9px; background: rgba(239,68,68,0.15); color: var(--red); padding: 1px 6px; border-radius: 4px; }
 .badge-video { font-size: 9px; background: rgba(100,116,139,0.2); color: var(--text-muted); padding: 1px 6px; border-radius: 4px; }
@@ -1504,6 +1619,12 @@ select option { background: var(--surface2); }
   transition: all 0.15s;
 }
 .action-btn:hover { border-color: var(--border-hi); color: var(--text); }
+.action-btn.role.active,
+.action-btn.role:hover {
+  border-color: rgba(34,197,94,0.45);
+  color: #22c55e;
+  background: rgba(34,197,94,0.1);
+}
 .action-btn.danger:hover { border-color: var(--red); color: var(--red); background: rgba(239,68,68,0.1); }
 
 /* ═══════════════════════════════════════════

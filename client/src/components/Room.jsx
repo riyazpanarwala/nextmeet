@@ -44,7 +44,9 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   const [whiteboardColor, setWhiteboardColor] = useState('#3b82f6');
   const [pinnedScreenId, setPinnedScreenId] = useState(null); // user-selected "main" screen share
   const [isHost, setIsHost] = useState(false);
+  const [isCoHost, setIsCoHost] = useState(false);
   const [localSocketId, setLocalSocketId] = useState('');
+  const [waitingRequests, setWaitingRequests] = useState([]);
   const [roomFullError, setRoomFullError] = useState(false);
   const [joinBlockedError, setJoinBlockedError] = useState('');
   const [roomLocked, setRoomLocked] = useState(false);
@@ -96,12 +98,14 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   const isMutedRef = useRef(isMuted);
   const isVideoOffRef = useRef(isVideoOff);
   const isHostRef = useRef(isHost);
+  const isCoHostRef = useRef(isCoHost);
   const localSocketIdRef = useRef(localSocketId);
   const showChatRef = useRef(showChat);
   const joinLeaveSoundsEnabledRef = useRef(joinLeaveSoundsEnabled);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { isVideoOffRef.current = isVideoOff; }, [isVideoOff]);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
+  useEffect(() => { isCoHostRef.current = isCoHost; }, [isCoHost]);
   useEffect(() => { localSocketIdRef.current = localSocketId; }, [localSocketId]);
   useEffect(() => { showChatRef.current = showChat; }, [showChat]);
   useEffect(() => { joinLeaveSoundsEnabledRef.current = joinLeaveSoundsEnabled; }, [joinLeaveSoundsEnabled]);
@@ -242,12 +246,15 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   useEffect(() => {
     if (!socket) return;
 
-    const onRoomJoined = ({ socketId, isHost: amHost, participants, screenSharingSocketIds, roomLocked: locked, whiteboard: initialWhiteboard, roomCreatedAt: serverRoomCreatedAt, annotationHistory }) => {
+    const onRoomJoined = ({ socketId, isHost: amHost, isCoHost: amCoHost, participants, screenSharingSocketIds, roomLocked: locked, whiteboard: initialWhiteboard, roomCreatedAt: serverRoomCreatedAt, annotationHistory }) => {
       console.log('[Room] room-joined', socketId, 'host:', amHost, 'peers:', participants.length);
+      setJoinBlockedError('');
       setLocalSocketId(socketId);
       localSocketIdRef.current = socketId;
-      setIsHost(amHost);
-      isHostRef.current = amHost;
+      setIsHost(Boolean(amHost));
+      isHostRef.current = Boolean(amHost);
+      setIsCoHost(Boolean(amCoHost));
+      isCoHostRef.current = Boolean(amCoHost);
       setRoomLocked(Boolean(locked));
       setRoomCreatedAt(serverRoomCreatedAt || Date.now());
       whiteboard.setInitialWhiteboard(initialWhiteboard);
@@ -259,7 +266,8 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
             next[p.socketId] = {
               ...(next[p.socketId] || {}),
               name: p.name,
-              isHost: p.isHost,
+              isHost: Boolean(p.isHost),
+              isCoHost: Boolean(p.isCoHost),
               isMuted: p.isMuted,
               isVideoOff: p.isVideoOff,
             };
@@ -294,6 +302,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       socketId,
       name,
       isHost: theirHost,
+      isCoHost: theirCoHost,
       isMuted: theirMuted,
       isVideoOff: theirVideoOff,
       handRaised: theirHandRaised,
@@ -305,7 +314,8 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
         [socketId]: {
           ...(prev[socketId] || {}),
           name,
-          isHost: theirHost,
+          isHost: Boolean(theirHost),
+          isCoHost: Boolean(theirCoHost),
           isMuted: Boolean(theirMuted),
           isVideoOff: Boolean(theirVideoOff),
           handRaised: Boolean(theirHandRaised),
@@ -556,11 +566,13 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       if (socketId === localSocketIdRef.current) {
         setIsHost(true);
         isHostRef.current = true;
+        setIsCoHost(false);
+        isCoHostRef.current = false;
       }
       setRemoteParticipants((prev) => {
         const next = { ...prev };
         Object.keys(next).forEach((id) => {
-          next[id] = { ...next[id], isHost: id === socketId };
+          next[id] = { ...next[id], isHost: id === socketId, isCoHost: id === socketId ? false : next[id].isCoHost };
         });
         return next;
       });
@@ -575,8 +587,48 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       setRoomLocked(Boolean(locked));
     };
 
+    const onWaitingRoomPending = () => {
+      setJoinBlockedError('Waiting for the host to admit you.');
+    };
+
+    const onWaitingRoomDenied = ({ reason }) => {
+      setJoinBlockedError(reason || 'The host denied your request to join.');
+    };
+
+    const onWaitingRoomList = ({ requests }) => {
+      setWaitingRequests(Array.isArray(requests) ? requests : []);
+    };
+
+    const onParticipantRoleUpdated = ({ socketId, isHost: nextIsHost, isCoHost: nextIsCoHost }) => {
+      if (socketId === localSocketIdRef.current) {
+        setIsHost(Boolean(nextIsHost));
+        isHostRef.current = Boolean(nextIsHost);
+        setIsCoHost(Boolean(nextIsCoHost));
+        isCoHostRef.current = Boolean(nextIsCoHost);
+        return;
+      }
+      setRemoteParticipants((prev) => ({
+        ...prev,
+        [socketId]: {
+          ...(prev[socketId] || {}),
+          isHost: Boolean(nextIsHost),
+          isCoHost: Boolean(nextIsCoHost),
+        },
+      }));
+    };
+
+    const onMeetingEnded = () => {
+      alert('The meeting was ended for everyone.');
+      doLeave();
+    };
+
     socket.on('room-joined', onRoomJoined);
     socket.on('user-joined', onUserJoined);
+    socket.on('waiting-room-pending', onWaitingRoomPending);
+    socket.on('waiting-room-denied', onWaitingRoomDenied);
+    socket.on('waiting-room-list', onWaitingRoomList);
+    socket.on('participant-role-updated', onParticipantRoleUpdated);
+    socket.on('meeting-ended', onMeetingEnded);
     socket.on('room-full', onRoomFull);
     socket.on('room-locked', onRoomLocked);
     socket.on('room-password-required', onRoomPasswordRequired);
@@ -613,6 +665,11 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
     return () => {
       socket.off('room-joined', onRoomJoined);
       socket.off('user-joined', onUserJoined);
+      socket.off('waiting-room-pending', onWaitingRoomPending);
+      socket.off('waiting-room-denied', onWaitingRoomDenied);
+      socket.off('waiting-room-list', onWaitingRoomList);
+      socket.off('participant-role-updated', onParticipantRoleUpdated);
+      socket.off('meeting-ended', onMeetingEnded);
       socket.off('room-full', onRoomFull);
       socket.off('room-locked', onRoomLocked);
       socket.off('room-password-required', onRoomPasswordRequired);
@@ -875,7 +932,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       roomId: localInfo.roomId,
       locked: !roomLocked,
     }, (res) => {
-      if (!res?.ok) alert('Only the host can lock or unlock this meeting.');
+      if (!res?.ok) alert('Only the host or a co-host can lock or unlock this meeting.');
     });
   }, [socket, localInfo, roomLocked]);
 
@@ -883,6 +940,39 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
     (targetSocketId) => socket.emit('remove-user', { roomId: localInfo.roomId, targetSocketId }),
     [socket, localInfo]
   );
+
+  const handleWaitingRoomResponse = useCallback(
+    (requesterSocketId, approved) => {
+      socket.emit('waiting-room-response', {
+        roomId: localInfo.roomId,
+        requesterSocketId,
+        approved,
+      }, (res) => {
+        if (!res?.ok) alert(res?.error || 'Could not update the waiting room request.');
+      });
+    },
+    [socket, localInfo]
+  );
+
+  const handleSetCoHost = useCallback(
+    (targetSocketId, nextIsCoHost) => {
+      socket.emit('cohost-set', {
+        roomId: localInfo.roomId,
+        targetSocketId,
+        isCoHost: nextIsCoHost,
+      }, (res) => {
+        if (!res?.ok) alert(res?.error || 'Could not update co-host role.');
+      });
+    },
+    [socket, localInfo]
+  );
+
+  const handleEndMeeting = useCallback(() => {
+    if (!window.confirm('End this meeting for everyone?')) return;
+    socket.emit('end-meeting', { roomId: localInfo.roomId }, (res) => {
+      if (!res?.ok) alert(res?.error || 'Could not end the meeting.');
+    });
+  }, [socket, localInfo]);
 
   const handleRequestAnnotationAccess = useCallback((screenOwnerId) => {
     setAnnotationAccessByScreen((prev) => ({ ...prev, [screenOwnerId]: 'pending' }));
@@ -1090,6 +1180,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       stream: localStream,
       name: localInfo.name,
       isHost,
+      isCoHost,
       isMuted,
       isVideoOff,
       isLocal: true,
@@ -1192,6 +1283,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
     : null;
 
   const count = allParticipants.length;
+  const canModerate = isHost || isCoHost;
   const gridCount = gridParticipants.length || 1;
   const cols = gridCount === 1 ? 1 : gridCount <= 4 ? 2 : 3;
   const raisedHandCount = allParticipants.filter((p) => p.handRaised).length;
@@ -1525,14 +1617,19 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
               socketId: p.socketId,
               name: p.name,
               isHost: p.isHost,
+              isCoHost: p.isCoHost,
               isMuted: p.isMuted,
               isVideoOff: p.isVideoOff,
               handRaised: p.handRaised,
             }))}
+            waitingRequests={waitingRequests}
             isHost={isHost}
+            canModerate={canModerate}
             localSocketId={localSocketId}
             onMuteUser={(id) => socket.emit('mute-user', { roomId: localInfo.roomId, targetSocketId: id })}
             onRemoveUser={handleRemoveUser}
+            onSetCoHost={handleSetCoHost}
+            onWaitingResponse={handleWaitingRoomResponse}
             onClose={handleToggleParticipants}
           />
         )}
@@ -1575,7 +1672,9 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
         showWhiteboard={whiteboard.isOpen}
         unreadCount={unreadCount}
         isHost={isHost}
+        isCoHost={isCoHost}
         onMuteAll={handleMuteAll}
+        onEndMeeting={handleEndMeeting}
         roomLocked={roomLocked}
         onToggleRoomLock={handleToggleRoomLock}
         joinLeaveSoundsEnabled={joinLeaveSoundsEnabled}

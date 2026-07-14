@@ -35,6 +35,9 @@ const MAX_PARTICIPANTS = 6;
 // roomId -> { locked: boolean, password: string }
 const roomSecurity = new Map();
 
+// roomId -> Map<socketId, pending participant payload>
+const roomWaitingRequests = new Map();
+
 // roomId -> Set<socketId> currently screen-sharing
 const roomScreenShares = new Map();
 const MAX_SCREEN_SHARES = 2;
@@ -78,8 +81,17 @@ function getScreenShareSet(roomId) {
 }
 
 function getRoomSecurity(roomId) {
-  if (!roomSecurity.has(roomId)) roomSecurity.set(roomId, { locked: false, password: '' });
+  if (!roomSecurity.has(roomId)) roomSecurity.set(roomId, { locked: false, password: '', waitingRoom: true });
   return roomSecurity.get(roomId);
+}
+
+function getWaitingRequestMap(roomId) {
+  if (!roomWaitingRequests.has(roomId)) roomWaitingRequests.set(roomId, new Map());
+  return roomWaitingRequests.get(roomId);
+}
+
+function isModerator(participant) {
+  return Boolean(participant?.isHost || participant?.isCoHost);
 }
 
 // Lazily stamps a room's creation time on first access so this is safe to
@@ -99,14 +111,107 @@ function cleanupEmptyRoom(roomId) {
   roomAnnotationGrants.delete(roomId);
   roomAnnotationHistory.delete(roomId);
   roomSecurity.delete(roomId);
+  roomWaitingRequests.delete(roomId);
   roomWhiteboards.delete(roomId);
   roomTimers.delete(roomId);
   return true;
 }
 
+function destroyRoom(roomId, reason = 'ended') {
+  const socketIds = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
+  io.to(roomId).emit('meeting-ended', { reason });
+  socketIds.forEach((socketId) => {
+    io.sockets.sockets.get(socketId)?.leave(roomId);
+  });
+
+  const waiting = roomWaitingRequests.get(roomId);
+  if (waiting) {
+    waiting.forEach((_, socketId) => {
+      io.to(socketId).emit('waiting-room-denied', { reason: 'Meeting ended.' });
+    });
+  }
+
+  rooms.delete(roomId);
+  roomScreenShares.delete(roomId);
+  roomAnnotationGrants.delete(roomId);
+  roomAnnotationHistory.delete(roomId);
+  roomSecurity.delete(roomId);
+  roomWaitingRequests.delete(roomId);
+  roomWhiteboards.delete(roomId);
+  roomTimers.delete(roomId);
+}
+
 function getRoomWhiteboard(roomId) {
   if (!roomWhiteboards.has(roomId)) roomWhiteboards.set(roomId, { open: false, shapes: [] });
   return roomWhiteboards.get(roomId);
+}
+
+function buildAnnotationHistoryPayload(roomId, screenSharingSocketIds) {
+  const annotationHistory = {};
+  screenSharingSocketIds.forEach((screenOwnerId) => {
+    const shapes = roomAnnotationHistory.get(roomId)?.get(screenOwnerId);
+    if (shapes && shapes.length) annotationHistory[screenOwnerId] = shapes;
+  });
+  return annotationHistory;
+}
+
+function addParticipantToRoom(socket, { roomId, userName, isMuted = false, isVideoOff = false, isHost = false, isCoHost = false }) {
+  if (!rooms.has(roomId)) rooms.set(roomId, new Map());
+  const room = rooms.get(roomId);
+
+  socket.join(roomId);
+  room.set(socket.id, {
+    name: userName,
+    isHost: Boolean(isHost),
+    isCoHost: Boolean(isCoHost),
+    isMuted: Boolean(isMuted),
+    isVideoOff: Boolean(isVideoOff),
+    handRaised: false,
+    roomId,
+  });
+
+  const security = getRoomSecurity(roomId);
+  const screenSharingSocketIds = Array.from(getScreenShareSet(roomId));
+  const others = getRoomParticipants(roomId).filter((p) => p.socketId !== socket.id);
+
+  socket.emit('room-joined', {
+    socketId: socket.id,
+    isHost: Boolean(isHost),
+    isCoHost: Boolean(isCoHost),
+    participants: others,
+    screenSharingSocketIds,
+    roomLocked: security.locked,
+    passwordProtected: Boolean(security.password),
+    waitingRoomEnabled: Boolean(security.waitingRoom),
+    whiteboard: getRoomWhiteboard(roomId),
+    roomCreatedAt: getRoomCreatedAt(roomId),
+    annotationHistory: buildAnnotationHistoryPayload(roomId, screenSharingSocketIds),
+  });
+
+  socket.to(roomId).emit('user-joined', {
+    socketId: socket.id,
+    name: userName,
+    isHost: Boolean(isHost),
+    isCoHost: Boolean(isCoHost),
+    isMuted: Boolean(isMuted),
+    isVideoOff: Boolean(isVideoOff),
+    handRaised: false,
+  });
+}
+
+function emitWaitingRequests(roomId) {
+  const requests = Array.from(getWaitingRequestMap(roomId).entries()).map(([socketId, data]) => ({
+    socketId,
+    name: data.userName,
+    requestedAt: data.requestedAt,
+  }));
+  const room = rooms.get(roomId);
+  if (!room) return;
+  for (const [socketId, participant] of room.entries()) {
+    if (isModerator(participant)) {
+      io.to(socketId).emit('waiting-room-list', { requests });
+    }
+  }
 }
 
 function getAnnotationGrantMap(roomId) {
@@ -201,6 +306,22 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (!isFirstJoiner && security.waitingRoom) {
+      const waiting = getWaitingRequestMap(roomId);
+      waiting.set(socket.id, {
+        roomId,
+        userName,
+        isMuted: Boolean(isMuted),
+        isVideoOff: Boolean(isVideoOff),
+        requestedAt: new Date().toISOString(),
+      });
+      socket.data.waitingRoomId = roomId;
+      socket.emit('waiting-room-pending', { roomId });
+      emitWaitingRequests(roomId);
+      console.log(`[~] ${userName} (${socket.id}) is waiting for admission to room ${roomId}`);
+      return;
+    }
+
     socket.join(roomId);
     const isHost = isFirstJoiner;
     if (isHost && createPassword) {
@@ -213,6 +334,7 @@ io.on('connection', (socket) => {
     room.set(socket.id, {
       name: userName,
       isHost,
+      isCoHost: false,
       isMuted: Boolean(isMuted),
       isVideoOff: Boolean(isVideoOff),
       handRaised: false,
@@ -248,6 +370,7 @@ io.on('connection', (socket) => {
       screenSharingSocketIds,
       roomLocked: security.locked,
       passwordProtected: Boolean(security.password),
+      waitingRoomEnabled: Boolean(security.waitingRoom),
       whiteboard: getRoomWhiteboard(roomId),
       roomCreatedAt: getRoomCreatedAt(roomId),
       annotationHistory,
@@ -258,6 +381,7 @@ io.on('connection', (socket) => {
       socketId: socket.id,
       name: userName,
       isHost,
+      isCoHost: false,
       isMuted: Boolean(isMuted),
       isVideoOff: Boolean(isVideoOff),
       handRaised: false,
@@ -383,7 +507,7 @@ io.on('connection', (socket) => {
   socket.on('room-lock-set', ({ roomId, locked }, callback) => {
     const room = rooms.get(roomId);
     const requester = room?.get(socket.id);
-    if (!requester?.isHost) {
+    if (!isModerator(requester)) {
       if (typeof callback === 'function') callback({ ok: false });
       return;
     }
@@ -392,6 +516,80 @@ io.on('connection', (socket) => {
     security.locked = Boolean(locked);
     io.to(roomId).emit('room-lock-updated', { locked: security.locked });
     if (typeof callback === 'function') callback({ ok: true, locked: security.locked });
+  });
+
+  socket.on('waiting-room-response', ({ roomId, requesterSocketId, approved }, callback) => {
+    const room = rooms.get(roomId);
+    const requester = room?.get(socket.id);
+    if (!isModerator(requester)) {
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    const waiting = getWaitingRequestMap(roomId);
+    const pending = waiting.get(requesterSocketId);
+    if (!pending) {
+      if (typeof callback === 'function') callback({ ok: false });
+      emitWaitingRequests(roomId);
+      return;
+    }
+
+    waiting.delete(requesterSocketId);
+    const target = io.sockets.sockets.get(requesterSocketId);
+
+    if (!approved) {
+      target?.emit('waiting-room-denied', { reason: 'The host denied your request to join.' });
+      emitWaitingRequests(roomId);
+      if (typeof callback === 'function') callback({ ok: true });
+      return;
+    }
+
+    if (!target) {
+      emitWaitingRequests(roomId);
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    if (room.size >= MAX_PARTICIPANTS) {
+      target.emit('room-full', { max: MAX_PARTICIPANTS });
+      emitWaitingRequests(roomId);
+      if (typeof callback === 'function') callback({ ok: false, full: true });
+      return;
+    }
+
+    delete target.data.waitingRoomId;
+    addParticipantToRoom(target, pending);
+    emitWaitingRequests(roomId);
+    if (typeof callback === 'function') callback({ ok: true });
+  });
+
+  socket.on('cohost-set', ({ roomId, targetSocketId, isCoHost }, callback) => {
+    const room = rooms.get(roomId);
+    const requester = room?.get(socket.id);
+    const target = room?.get(targetSocketId);
+    if (!requester?.isHost || !target || target.isHost) {
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    room.set(targetSocketId, { ...target, isCoHost: Boolean(isCoHost) });
+    io.to(roomId).emit('participant-role-updated', {
+      socketId: targetSocketId,
+      isCoHost: Boolean(isCoHost),
+    });
+    if (typeof callback === 'function') callback({ ok: true });
+  });
+
+  socket.on('end-meeting', ({ roomId }, callback) => {
+    const room = rooms.get(roomId);
+    const requester = room?.get(socket.id);
+    if (!isModerator(requester)) {
+      if (typeof callback === 'function') callback({ ok: false });
+      return;
+    }
+
+    destroyRoom(roomId, 'ended');
+    if (typeof callback === 'function') callback({ ok: true });
   });
 
   socket.on('annotation-access-response', ({ roomId, requesterSocketId, approved }, callback) => {
@@ -596,21 +794,23 @@ io.on('connection', (socket) => {
   socket.on('mute-all', ({ roomId }) => {
     const room = rooms.get(roomId);
     const requester = room?.get(socket.id);
-    if (!requester?.isHost) return;
+    if (!isModerator(requester)) return;
     socket.to(roomId).emit('host-mute-all');
   });
 
   socket.on('mute-user', ({ roomId, targetSocketId }) => {
     const room = rooms.get(roomId);
     const requester = room?.get(socket.id);
-    if (!requester?.isHost || !room?.has(targetSocketId)) return;
+    if (!isModerator(requester) || !room?.has(targetSocketId)) return;
     io.to(targetSocketId).emit('host-mute-user');
   });
 
   socket.on('remove-user', ({ roomId, targetSocketId }) => {
     const room = rooms.get(roomId);
     const requester = room?.get(socket.id);
-    if (!requester?.isHost) return;
+    if (!isModerator(requester)) return;
+    const targetParticipant = room?.get(targetSocketId);
+    if (!targetParticipant || (targetParticipant.isHost && !requester.isHost)) return;
     io.to(targetSocketId).emit('removed-from-room');
     const target = io.sockets.sockets.get(targetSocketId);
     if (target) {
@@ -645,8 +845,10 @@ io.on('connection', (socket) => {
 
       if (!cleanupEmptyRoom(roomId) && leaving?.isHost) {
         // Transfer host to next participant
-        const [newHostId, newHostData] = room.entries().next().value;
-        room.set(newHostId, { ...newHostData, isHost: true });
+        const preferredHost = Array.from(room.entries()).find(([, data]) => data.isCoHost)
+          || room.entries().next().value;
+        const [newHostId, newHostData] = preferredHost;
+        room.set(newHostId, { ...newHostData, isHost: true, isCoHost: false });
         io.to(roomId).emit('host-transferred', { socketId: newHostId });
       }
 
@@ -656,6 +858,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    const waitingRoomId = socket.data.waitingRoomId;
+    if (waitingRoomId) {
+      getWaitingRequestMap(waitingRoomId).delete(socket.id);
+      emitWaitingRequests(waitingRoomId);
+      cleanupEmptyRoom(waitingRoomId);
+    }
     console.log(`[-] Socket disconnected: ${socket.id}`);
   });
 });

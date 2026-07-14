@@ -129,7 +129,7 @@ export function Controls({
   onToggleWhiteboard,
   onLeave, onToggleChat, onToggleParticipants, onToggleRecording,
   showChat, showParticipants, showRecording, showWhiteboard, unreadCount,
-  isHost, onMuteAll,
+  isHost, isCoHost = false, onMuteAll, onEndMeeting,
   roomLocked = false, onToggleRoomLock,
   joinLeaveSoundsEnabled = true, onToggleJoinLeaveSounds,
   devices, selectedDevices, onSwitchAudio, onSwitchVideo, onSwitchSpeaker,
@@ -141,6 +141,7 @@ export function Controls({
   // Opening one closes the other so they never overlap.
   const [showMore, setShowMore] = useState(false);
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
+  const canModerate = isHost || isCoHost;
 
   const handleMoreToggle = () => {
     setShowMore((s) => !s);
@@ -324,14 +325,19 @@ export function Controls({
         </div>
 
         <div className="controls-right">
-          {isHost && (
+          {canModerate && (
             <button className="host-ctrl-btn" onClick={onToggleRoomLock} title={roomLocked ? 'Unlock meeting' : 'Lock meeting'}>
               {roomLocked ? 'Unlock' : 'Lock'}
             </button>
           )}
-          {isHost && (
+          {canModerate && (
             <button className="host-ctrl-btn" onClick={onMuteAll} title="Mute all participants">
               Mute All
+            </button>
+          )}
+          {canModerate && (
+            <button className="host-ctrl-btn danger" onClick={onEndMeeting} title="End meeting for everyone">
+              End
             </button>
           )}
         </div>
@@ -425,7 +431,7 @@ export function Controls({
             )}
 
             {/* Mute All is a fire-and-forget action, not a panel — no need to close More */}
-            {isHost && (
+            {canModerate && (
               <button
                 type="button"
                 className={`settings-quick-btn mirror-muteall ${roomLocked ? 'active' : ''}`}
@@ -436,7 +442,7 @@ export function Controls({
               </button>
             )}
 
-            {isHost && (
+            {canModerate && (
               <button
                 type="button"
                 className="settings-quick-btn mirror-muteall"
@@ -444,6 +450,20 @@ export function Controls({
               >
                 <MicIcon muted />
                 <span>Mute all</span>
+              </button>
+            )}
+
+            {canModerate && (
+              <button
+                type="button"
+                className="settings-quick-btn mirror-muteall danger"
+                onClick={() => {
+                  onEndMeeting();
+                  closeMore();
+                }}
+              >
+                <LeaveIcon />
+                <span>End meeting</span>
               </button>
             )}
 
