@@ -10,6 +10,7 @@ const SHORTCUTS = [
     { keys: 'P', label: 'Toggle participants' },
     { keys: 'R', label: 'Toggle recording panel' },
     { keys: 'W', label: 'Toggle whiteboard' },
+    { keys: 'L', label: 'Toggle live captions' },
     { keys: '?', label: 'Show this shortcuts list' },
     { keys: 'Esc', label: 'Close open panels' },
 ];

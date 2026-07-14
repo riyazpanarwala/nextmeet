@@ -1,0 +1,56 @@
+/* ═══════════════════════════════════════════
+   LIVE CAPTIONS (Web Speech API)
+   ═══════════════════════════════════════════ */
+.captions-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  width: min(720px, 92%);
+  pointer-events: none;
+}
+
+.caption-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  padding: 7px 14px;
+  border-radius: 10px;
+  background: rgba(10, 13, 20, 0.82);
+  backdrop-filter: blur(6px);
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.caption-line.interim {
+  opacity: 0.72;
+}
+
+.caption-speaker {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.caption-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .captions-overlay {
+    bottom: 8px;
+    width: 96%;
+  }
+  .caption-line {
+    font-size: 13px;
+    padding: 6px 10px;
+  }
+}

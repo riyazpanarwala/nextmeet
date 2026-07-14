@@ -571,6 +571,27 @@ io.on('connection', (socket) => {
     });
   });
 
+  // ─── LIVE CAPTIONS (Web Speech API, client-side transcription) ─
+  // The server never sees or stores audio — each client runs its own
+  // browser's SpeechRecognition on its own mic and relays only the
+  // resulting text. This just fans that text out to the rest of the
+  // room, same shape as chat relay. Nothing is persisted.
+  socket.on('caption-text', ({ roomId, text, isFinal }) => {
+    const room = rooms.get(roomId);
+    const participant = room?.get(socket.id);
+    if (!participant) return;
+
+    const safeText = String(text || '').trim().slice(0, 500);
+    if (!safeText) return;
+
+    socket.to(roomId).emit('caption-text', {
+      socketId: socket.id,
+      name: participant.name || 'Participant',
+      text: safeText,
+      isFinal: Boolean(isFinal),
+    });
+  });
+
   // ─── HOST CONTROLS ───────────────────────────────────────────
   socket.on('mute-all', ({ roomId }) => {
     const room = rooms.get(roomId);

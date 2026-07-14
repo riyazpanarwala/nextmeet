@@ -85,6 +85,14 @@ const WhiteboardIcon = () => (
   </svg>
 );
 
+const CaptionsIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <path d="M7 10.5c-.6-.7-1.4-1-2.2-1-1.5 0-2.6 1.1-2.6 2.5S3.3 14.5 4.8 14.5c.8 0 1.6-.3 2.2-1" />
+    <path d="M16.5 10.5c-.6-.7-1.4-1-2.2-1-1.5 0-2.6 1.1-2.6 2.5s1.1 2.5 2.6 2.5c.8 0 1.6-.3 2.2-1" />
+  </svg>
+);
+
 const LockIcon = ({ locked }) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="4" y="10" width="16" height="10" rx="2" />
@@ -125,6 +133,7 @@ export function Controls({
   roomLocked = false, onToggleRoomLock,
   joinLeaveSoundsEnabled = true, onToggleJoinLeaveSounds,
   devices, selectedDevices, onSwitchAudio, onSwitchVideo, onSwitchSpeaker,
+  captionsSupported = false, captionsEnabled = false, onToggleCaptions,
 }) {
   // Two independent panels: "More" = meeting controls (raise hand, record,
   // chat, people, mute all). "Settings" = device settings (mic/camera/speaker).
@@ -278,6 +287,17 @@ export function Controls({
             <span className="mobile-label">Board</span>
           </button>
 
+          {captionsSupported && (
+            <button
+              className={`ctrl-btn mobile-overflow-action ${captionsEnabled ? 'active-green' : ''}`}
+              onClick={onToggleCaptions}
+              title={captionsEnabled ? 'Turn off captions' : 'Turn on live captions'}
+            >
+              <CaptionsIcon />
+              <span className="mobile-label">{captionsEnabled ? 'CC on' : 'CC'}</span>
+            </button>
+          )}
+
           {/* More — only meaningful once some of the bar buttons above collapse
             out of view (tablet/mobile). Hidden entirely on desktop via CSS
             (.more-btn), since every action it holds is already visible in
@@ -388,6 +408,20 @@ export function Controls({
               <WhiteboardIcon />
               <span>Whiteboard</span>
             </button>
+
+            {captionsSupported && (
+              <button
+                type="button"
+                className={`settings-quick-btn mirror-board ${captionsEnabled ? 'active' : ''}`}
+                onClick={() => {
+                  onToggleCaptions();
+                  closeMore();
+                }}
+              >
+                <CaptionsIcon />
+                <span>{captionsEnabled ? 'Captions on' : 'Captions'}</span>
+              </button>
+            )}
 
             {/* Mute All is a fire-and-forget action, not a panel — no need to close More */}
             {isHost && (

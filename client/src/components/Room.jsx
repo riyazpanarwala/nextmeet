@@ -4,6 +4,7 @@ import { useRecording } from '../hooks/useRecording';
 import { useAnnotations } from '../hooks/useAnnotations';
 import { useConnectionQuality } from '../hooks/useConnectionQuality';
 import { useWhiteboard } from '../hooks/useWhiteboard';
+import { useCaptions } from '../hooks/useCaptions';
 import { VideoTile } from './VideoTile';
 import { Controls } from './Controls';
 import { ChatPanel } from './ChatPanel';
@@ -11,6 +12,7 @@ import { ParticipantsPanel } from './ParticipantsPanel';
 import { RecordingPanel } from './RecordingPanel';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { WhiteboardPanel } from './WhiteboardPanel';
+import { CaptionsOverlay } from './CaptionsOverlay';
 import { downloadAnnotationPdf, downloadAnnotationPng } from '../utils/annotationExport';
 import { useMeetingTimer, formatElapsed } from '../hooks/useMeetingTimer';
 import { ThemeToggle } from './ThemeToggle';
@@ -73,6 +75,17 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
   const whiteboard = useWhiteboard({
     socket,
     roomId: localInfo.roomId,
+  });
+  const {
+    captionsSupported,
+    captionsEnabled,
+    captionsBySpeaker,
+    toggleCaptions,
+  } = useCaptions({
+    socket,
+    roomId: localInfo.roomId,
+    localSocketId,
+    localName: localInfo.name,
   });
   const elapsedSeconds = useMeetingTimer(roomCreatedAt);
 
@@ -975,6 +988,9 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       } else if (key === 'w') {
         event.preventDefault();
         handleToggleWhiteboard();
+      } else if (key === 'l') {
+        event.preventDefault();
+        if (captionsSupported) toggleCaptions();
       } else if (key === '?') {
         event.preventDefault();
         setShowShortcuts((s) => !s);
@@ -998,6 +1014,8 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
     handleToggleScreen,
     handleToggleWhiteboard,
     whiteboard,
+    captionsSupported,
+    toggleCaptions,
   ]);
 
   // ── Annotation handlers (sharer-only — see AnnotationToolbar) ────
@@ -1359,6 +1377,7 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
       )}
 
       <div className="room-body">
+        {captionsEnabled && <CaptionsOverlay captionsBySpeaker={captionsBySpeaker} />}
         {whiteboard.isOpen ? (
           <WhiteboardPanel
             roomId={localInfo.roomId}
@@ -1563,6 +1582,9 @@ export function Room({ socket, localInfo, mediaState, onLeave, theme, onToggleTh
         onSwitchAudio={handleSwitchAudioDevice}
         onSwitchVideo={handleSwitchVideoDevice}
         onSwitchSpeaker={setSpeakerDevice}
+        captionsSupported={captionsSupported}
+        captionsEnabled={captionsEnabled}
+        onToggleCaptions={toggleCaptions}
       />
 
       {showShortcuts && (
