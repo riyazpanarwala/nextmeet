@@ -1,6 +1,6 @@
 # NexMeet Architecture
 
-This document describes the current NexMeet implementation: a small-room WebRTC mesh app with Socket.IO signaling, local-only recording, raised hands, host controls, live screen-share annotations, and direction-aware screen-share peer connections.
+This document describes the current NexMeet implementation: a small-room WebRTC mesh app with Socket.IO signaling, transient room security and collaboration state, local-only recording, browser-native live captions, a shared whiteboard, live screen-share annotations, and direction-aware screen-share peer connections.
 
 ## 1. System Overview
 
@@ -20,10 +20,13 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
 - Track in-memory room membership and participant metadata.
 - Enforce the 6-participant room limit.
 - Relay SDP offers, answers, and ICE candidates.
-- Relay chat messages.
+- Enforce password and room-lock admission rules.
+- Relay rich chat messages, reactions, and caption text.
 - Broadcast mute/video and raised-hand state.
 - Enforce a maximum of 2 active screen sharers per room.
-- Track per-screen annotation grants and relay live annotation events.
+- Track per-screen annotation grants and active-share shape history, capped at 300 shapes per share.
+- Hold shared whiteboard state for the lifetime of a room.
+- Stamp a room creation time so every client uses the same meeting-timer anchor.
 - Handle host-only mute-all, mute-user, and remove-user actions.
 - Transfer host role when the current host leaves.
 - Expose lightweight health and room-info endpoints.
@@ -31,8 +34,8 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
 ### Server non-goals
 
 - No media forwarding, mixing, transcoding, or recording.
-- No persistent chat storage.
-- No persistent annotation history.
+- No persistent chat, caption, whiteboard, annotation, password, or timer storage.
+- No speech recognition or translation on the server; caption audio stays in the participant's browser.
 - No authentication or authorization beyond host checks for host actions.
 - No database; room state is process-local memory.
 
@@ -50,10 +53,15 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
   - Express app and HTTP server.
   - Socket.IO server with permissive CORS for development.
   - `rooms`: `Map<roomId, Map<socketId, participant>>`.
+  - `roomSecurity`: `Map<roomId, { locked, password }>`.
   - `roomScreenShares`: `Map<roomId, Set<socketId>>`.
   - `roomAnnotationGrants`: `Map<roomId, Map<screenOwnerId, Set<grantedSocketId>>>`.
+  - `roomAnnotationHistory`: `Map<roomId, Map<screenOwnerId, Shape[]>>`.
+  - `roomWhiteboards`: `Map<roomId, { open, shapes }>`.
+  - `roomTimers`: `Map<roomId, createdAtEpochMs>`.
   - `MAX_PARTICIPANTS = 6`.
   - `MAX_SCREEN_SHARES = 2`.
+  - `MAX_CHAT_FILE_BYTES = 5 MiB` and a larger Socket.IO frame limit for base64 attachments.
 
 ### Client
 
@@ -95,12 +103,32 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
   - Applies incoming annotation events from Socket.IO.
   - Removes a screen's local shape state when that share ends.
 
+- `client/src/hooks/useWhiteboard.js`
+  - Synchronizes board visibility and shapes through Socket.IO.
+  - Initializes late joiners from the `room-joined.whiteboard` snapshot.
+
+- `client/src/hooks/useCaptions.js`
+  - Uses `SpeechRecognition`/`webkitSpeechRecognition` to transcribe only the local participant's default microphone input.
+  - Relays interim and final text, maintains recent lines by speaker, and restarts recognition after browser timeouts.
+  - Applies a locally persisted BCP-47 language choice; captions are transcription, not translation.
+
+- `client/src/hooks/useConnectionQuality.js`
+  - Samples camera peer-connection statistics every 5 seconds.
+  - Classifies peers as good, fair, poor, or unknown from RTT, packet loss, jitter, and connection state.
+
+- `client/src/hooks/useMeetingTimer.js`
+  - Computes elapsed time from the server-provided `roomCreatedAt` value.
+
+- `client/src/hooks/useTheme.js`
+  - Applies and persists light/dark theme state, initially respecting the system preference.
+
 - `client/src/components/Room.jsx`
   - Registers socket listeners.
   - Emits `join-room` after listeners are attached.
-  - Orchestrates camera signaling, screen-share signaling, chat, hands, host events, annotations, recording, and cleanup.
+  - Orchestrates camera signaling, screen-share signaling, chat, captions, whiteboard, hands, host/security events, annotations, recording, and cleanup.
   - Builds separate camera participant tiles and screen-share tiles.
   - Supports presentation layout for one or two active screen shares.
+  - Owns participant pin/spotlight and floating in-app PiP state, join/leave tones, keyboard shortcuts, and the synchronized timer display.
 
 - `client/src/components/AnnotationOverlay.jsx`
   - Renders an SVG overlay on top of a screen-share video.
@@ -108,7 +136,13 @@ The server does not proxy media. Camera, microphone, and screen-share tracks flo
   - Captures pointer input only when the current user has drawing access and a tool is selected.
 
 - `client/src/components/AnnotationToolbar.jsx`
-  - Provides pen, highlighter, line, arrow, rectangle, circle, color, undo, clear, and target-selection controls.
+  - Provides pen, highlighter, line, arrow, rectangle, circle, text, color, undo, clear, export, and target-selection controls.
+
+- `client/src/components/WhiteboardPanel.jsx`
+  - Renders the room-wide SVG drawing surface and exports its shapes as PNG or PDF.
+
+- `client/src/components/CaptionsOverlay.jsx`
+  - Renders up to the 3 most recently active caption speakers in an `aria-live` region.
 
 ## 3. Room Join and Camera Handshake
 
@@ -119,14 +153,23 @@ User submits lobby form
   App.startLocalStream()
   App mounts Room
   Room registers socket listeners
-  Room emits join-room { roomId, userName, isMuted, isVideoOff }
+  Room emits join-room {
+    roomId, userName, isMuted, isVideoOff,
+    password, createPassword
+  }
 ```
+
+The first joiner becomes host, may set `createPassword`, and causes the server to stamp `roomCreatedAt`. Later joiners are rejected before `socket.join(roomId)` when the room is locked, the password is missing/invalid, or the 6-person limit is reached. Passwords and locks are process-memory controls, not authenticated or persistent security boundaries.
 
 When a new participant joins an existing room:
 
 ```text
 Bob -> server: join-room
-server -> Bob: room-joined { socketId, isHost, participants: [Alice], screenSharingSocketIds }
+server -> Bob: room-joined {
+  socketId, isHost, participants: [Alice], screenSharingSocketIds,
+  roomLocked, passwordProtected, whiteboard, roomCreatedAt,
+  annotationHistory
+}
 server -> Alice: user-joined { socketId: Bob, ...mediaState }
 
 Bob:
@@ -295,7 +338,7 @@ Annotations are drawn as client-side SVG overlays on top of screen-share video t
 shapesByScreen: screenOwnerId -> Shape[]
 ```
 
-Each shape has an ID, tool, color, and normalized coordinates. Freehand pen/highlighter shapes store point arrays. Line, arrow, rectangle, and circle shapes store start/end coordinates. `AnnotationOverlay` converts those normalized coordinates back into pixels using the actual letterboxed content rectangle of the video element, so marks stay aligned across main view, sidebar view, split presentation view, and different participant window sizes.
+Each shape has an ID, tool, color, and normalized coordinates. Freehand pen/highlighter shapes store point arrays. Line, arrow, rectangle, and circle shapes store start/end coordinates. Text shapes store an anchor and up to 300 characters. `AnnotationOverlay` converts normalized coordinates back into pixels using the actual letterboxed content rectangle of the video element, so marks stay aligned across main view, sidebar view, split presentation view, and different participant window sizes.
 
 ### Access model
 
@@ -334,6 +377,8 @@ User draws on AnnotationOverlay
 
 Server:
   canAnnotate(roomId, screenOwnerId, socket.id)
+  append the shape to roomAnnotationHistory[roomId][screenOwnerId]
+  retain at most 300 shapes, dropping the oldest first
   if allowed, socket.to(roomId).emit('annotation-draw', { screenOwnerId, shape })
 
 Peers:
@@ -343,14 +388,71 @@ Peers:
 
 Undo and clear follow the same authorization path with `annotation-undo` and `annotation-clear`.
 
+PNG/PDF export is entirely local. `annotationExport.js` converts the current normalized SVG shape list to an exported document; the screen-share video itself is not included.
+
 ### Constraints
 
-- Annotation state is live and ephemeral.
-- The server does not store shape history or replay old shapes to late joiners.
+- Annotation state is ephemeral but replayable for the lifetime of an active share.
+- `room-joined.annotationHistory` contains the current capped history for active shares, allowing a late joiner to render the existing overlay immediately.
 - Shape lists are scoped by `screenOwnerId`, so two simultaneous shares can be annotated independently.
-- Local cleanup removes shapes when the corresponding screen share ends.
+- The server and clients remove shapes when the corresponding screen share stops or restarts; no annotation history survives the room process.
 
-## 9. Recording Architecture
+## 9. Shared Whiteboard Architecture
+
+The whiteboard is a room-wide SVG surface rather than media. Any admitted participant can open/close it, draw, undo the latest board shape, or clear it.
+
+```text
+Participant opens board
+  useWhiteboard.setOpen(true)
+  emit whiteboard-open-set { roomId, open: true }
+
+Server updates roomWhiteboards[roomId].open
+  emit whiteboard-open-updated to the room
+
+Participant completes a shape
+  add it locally with a generated ID
+  emit whiteboard-draw { roomId, shape }
+
+Server appends the shape to roomWhiteboards[roomId].shapes
+  relay whiteboard-draw to the other participants
+```
+
+Undo removes a shape by ID, and clear replaces the server list with an empty array. `room-joined.whiteboard` initializes both open state and shapes for late joiners. Board shapes use normalized coordinates and the same pen, highlighter, line, arrow, rectangle, circle, and text model as annotations. PNG/PDF export happens locally. Whiteboard state is deleted when the room becomes empty or the server restarts.
+
+## 10. Chat and File Relay
+
+Chat is a room relay with no message history on the server. A message may contain up to 2,000 characters, one optional file, and a compact reply snapshot. Files are converted to data URLs in the sender's browser and validated on both client and server at a 5 MiB raw-file limit. Socket.IO's `maxHttpBufferSize` is raised to accommodate base64 expansion.
+
+The server adds the message ID, trusted participant name, timestamp, empty reaction map, and sanitized reply/file metadata, then broadcasts the payload to the entire room, including the sender. Reactions are separate `chat-reaction` events limited to `Like`, `Love`, and `Laugh`; clients merge them into their local message state. Messages, files, and reactions disappear when clients leave or reload because the server does not retain a chat log.
+
+## 11. Live Caption Architecture
+
+Live captions are opt-in per participant and use the browser's native `SpeechRecognition` or `webkitSpeechRecognition` implementation.
+
+```text
+Local participant enables captions
+  recognition.lang = persisted BCP-47 language
+  continuous = true; interimResults = true
+  browser listens to its default microphone input
+
+recognition.onresult
+  render the local interim/final line immediately
+  emit caption-text { roomId, text, isFinal }
+
+Server
+  verifies room membership
+  trims text to 500 characters
+  relays { socketId, participant name, text, isFinal } to other sockets
+
+Receiving clients with captions enabled
+  keep the latest line per speaker
+  show the 3 most recently active speakers
+  remove each line 6 seconds after its latest update
+```
+
+`SpeechRecognition` cannot be bound to a supplied `MediaStream`, so it transcribes only the local browser's default input rather than remote WebRTC audio. The server receives text only, stores no transcript, and performs no translation. Recognition is recreated when the language changes and automatically restarted after silence/internal browser timeouts while captions remain enabled. Permission errors disable the feature. The controls are hidden when neither speech-recognition constructor exists.
+
+## 12. Recording Architecture
 
 Recording is local to the user who starts it.
 
@@ -374,13 +476,13 @@ When recording stops:
 - Download uses `nexmeet-{roomId}-{timestamp}.webm` from `Room.jsx`.
 - The recording never leaves the browser.
 
-## 10. Socket API
+## 13. Socket API
 
 ### Client to server
 
 | Event | Payload | Notes |
 | --- | --- | --- |
-| `join-room` | `{ roomId, userName, isMuted, isVideoOff }` | Creates room if needed |
+| `join-room` | `{ roomId, userName, isMuted, isVideoOff, password, createPassword }` | Creates room if needed and applies admission rules |
 | `offer` | `{ to, offer, kind }` | `kind` is `camera` or `screen` |
 | `answer` | `{ to, answer, kind }` | Routed directly to `to` |
 | `ice-candidate` | `{ to, candidate, kind }` | Routed directly to `to` |
@@ -388,13 +490,20 @@ When recording stops:
 | `hand-state` | `{ roomId, raised }` | Updates server copy and broadcasts |
 | `screen-share-started` | `{ roomId }`, ack | Enforces max 2 active sharers |
 | `screen-share-stopped` | `{ roomId }` | Releases screen-share slot |
+| `room-lock-set` | `{ roomId, locked }`, ack | Host-only admission lock |
 | `annotation-request-access` | `{ roomId, screenOwnerId }`, ack | Request permission to draw on a screen share |
 | `annotation-access-response` | `{ roomId, requesterSocketId, approved }`, ack | Screen owner allows or denies draw access |
 | `annotation-access-revoke` | `{ roomId, screenOwnerId, targetSocketId }`, ack | Screen owner revokes draw access |
 | `annotation-draw` | `{ roomId, screenOwnerId, shape }` | Relays a finalized annotation shape |
 | `annotation-undo` | `{ roomId, screenOwnerId, shapeId }` | Relays removal of one shape |
 | `annotation-clear` | `{ roomId, screenOwnerId }` | Relays clear for one screen's shapes |
-| `chat-message` | `{ roomId, message }` | Server adds id/name/timestamp |
+| `whiteboard-open-set` | `{ roomId, open }` | Updates shared board visibility |
+| `whiteboard-draw` | `{ roomId, shape }` | Stores and relays a board shape |
+| `whiteboard-undo` | `{ roomId, shapeId }` | Removes and relays a board shape ID |
+| `whiteboard-clear` | `{ roomId }` | Clears shared board shapes |
+| `chat-message` | `{ roomId, message, file?, replyTo? }` | Server validates and enriches the message |
+| `chat-reaction` | `{ roomId, messageId, reaction }` | Relays an allowed reaction |
+| `caption-text` | `{ roomId, text, isFinal }` | Relays client-recognized transcript text |
 | `mute-all` | `{ roomId }` | Host-only server check |
 | `mute-user` | `{ roomId, targetSocketId }` | Host-only server check |
 | `remove-user` | `{ roomId, targetSocketId }` | Host-only server check |
@@ -403,10 +512,12 @@ When recording stops:
 
 | Event | Payload | Notes |
 | --- | --- | --- |
-| `room-joined` | `{ socketId, isHost, participants, screenSharingSocketIds }` | Sent to joining socket |
+| `room-joined` | `{ socketId, isHost, participants, screenSharingSocketIds, roomLocked, passwordProtected, whiteboard, roomCreatedAt, annotationHistory }` | Sent to joining socket with transient room snapshots |
 | `user-joined` | `{ socketId, name, isHost, isMuted, isVideoOff, handRaised }` | Broadcast to existing sockets |
 | `user-left` | `{ socketId }` | Triggers PC cleanup |
 | `room-full` | `{ max }` | Sent to rejected joiner |
+| `room-locked` | none | Admission rejected by the room lock |
+| `room-password-required` | `{ invalid }` | Admission requires a valid password |
 | `offer` | `{ from, offer, kind }` | Camera or screen offer |
 | `answer` | `{ from, answer, kind }` | Camera or screen answer |
 | `ice-candidate` | `{ from, candidate, kind }` | Camera or screen ICE |
@@ -420,20 +531,27 @@ When recording stops:
 | `annotation-draw` | `{ screenOwnerId, shape }` | Adds a remote annotation shape |
 | `annotation-undo` | `{ screenOwnerId, shapeId }` | Removes a remote annotation shape |
 | `annotation-clear` | `{ screenOwnerId }` | Clears remote annotation shapes |
-| `chat-message` | `{ id, from, name, message, timestamp }` | Appended to chat panel |
+| `room-lock-updated` | `{ locked }` | Synchronizes lock status |
+| `whiteboard-open-updated` | `{ open }` | Synchronizes board visibility |
+| `whiteboard-draw` | `{ shape }` | Adds a remote board shape |
+| `whiteboard-undo` | `{ shapeId }` | Removes a remote board shape |
+| `whiteboard-clear` | none | Clears local board shapes |
+| `chat-message` | `{ id, from, name, message, file, replyTo, reactions, timestamp }` | Appended to chat panel |
+| `chat-reaction` | `{ messageId, reaction, socketId, name }` | Merged into a local message |
+| `caption-text` | `{ socketId, name, text, isFinal }` | Updates a remote caption line |
 | `host-mute-all` | none | Receiver mutes local audio track |
 | `host-mute-user` | none | Receiver mutes local audio track |
 | `host-transferred` | `{ socketId }` | Updates host badges and host controls |
 | `removed-from-room` | none | Receiver leaves room after alert |
 
-## 11. REST API
+## 14. REST API
 
 | Method | Path | Response |
 | --- | --- | --- |
 | GET | `/health` | `{ status: 'ok' }` |
 | GET | `/room/:roomId/info` | `{ exists, count, screenSharesActive, maxScreenShares }` |
 
-## 12. Media and Device Handling
+## 15. Media and Device Handling
 
 ### Initial capture
 
@@ -451,9 +569,19 @@ Captured tracks are enabled or disabled based on the lobby's initial mute/camera
 
 - iOS Safari does not support `getDisplayMedia`, so screen sharing is disabled by feature detection.
 - Firefox and Safari do not support `setSinkId`, so speaker selection may be unavailable.
+- Live captions are exposed only when `SpeechRecognition` or `webkitSpeechRecognition` exists; supported recognition languages vary by browser and platform.
 - Production capture requires HTTPS, except on localhost.
 
-## 13. Reliability and Cleanup
+### Client-local meeting preferences and views
+
+- Pin/spotlight and floating PiP selections change only the current participant's layout; they are not broadcast.
+- Connection-quality labels are derived locally from each camera PC's inbound statistics and sampled every 5 seconds.
+- Light/dark theme, caption language, and join/leave-sound preference are stored in `localStorage`.
+- Join/leave tones are synthesized with the Web Audio API rather than loaded audio assets.
+- Keyboard shortcuts cover mute, camera, screen share, hand, chat, participants, recording, whiteboard, captions, the shortcut modal, and panel dismissal; they are ignored while typing.
+- The displayed timer is client-rendered but derives from the server's shared `roomCreatedAt` epoch.
+
+## 16. Reliability and Cleanup
 
 ### ICE candidate queuing
 
@@ -472,6 +600,7 @@ Local leave:
 - Close all camera PCs.
 - Close all outgoing and incoming screen PCs.
 - Drop local annotation shapes and access UI for ended shares.
+- Stop local speech recognition and clear caption cleanup timers.
 - Stop local camera, microphone, and screen tracks.
 - Return to the lobby.
 
@@ -485,8 +614,9 @@ Server disconnect:
 - Broadcast `user-left`.
 - Transfer host if the leaving socket was host.
 - Delete empty room, screen-share, and annotation-grant state.
+- Delete empty-room security, annotation-history, whiteboard, and timer state.
 
-## 14. Scaling and Production Notes
+## 17. Scaling and Production Notes
 
 ### Mesh limits
 
@@ -505,12 +635,16 @@ For larger rooms, migrate media to an SFU such as LiveKit, mediasoup, or Janus. 
 - Add server-side rate limits for annotation events.
 - Consider structured logging and room metrics.
 
-## 15. Important Current Constraints
+## 18. Important Current Constraints
 
-- Rooms and chat messages are in-memory only.
-- Annotation grants and shapes are live-session state only; shapes are not stored on the server.
+- Rooms, passwords, locks, timers, whiteboards, and annotation state are in-memory only.
+- Chat messages, attachment data, reactions, and captions are relayed but not retained by the server.
+- Annotation history is retained only for an active share, capped at 300 shapes, and cleared when the share stops or restarts.
 - Refreshing the server process drops all rooms.
 - Host identity is not authenticated.
+- Room passwords are stored as plaintext in process memory and are not a substitute for authenticated access control.
 - Recording is local and records the local user's received media/layout only.
 - Screen sharing depends on browser support for `getDisplayMedia`.
+- Captions depend on the non-uniform browser Web Speech API, transcribe the local default input only, and do not translate.
+- Whiteboard shape history has no current server-side count cap; add validation/rate limits before exposing untrusted public rooms.
 - The app is designed for up to 6 participants, not large webinars.
