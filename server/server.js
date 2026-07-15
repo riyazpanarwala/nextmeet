@@ -11,29 +11,31 @@ app.use(express.json());
 // see SOCKET_MAX_BUFFER_BYTES below.
 const MAX_CHAT_FILE_BYTES = 5 * 1024 * 1024;
 
-// Hosted LibreTranslate endpoint. This intentionally remains configurable:
-// community mirrors have no uptime guarantee and some require an API key.
-const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL
-  || 'https://translate.fedilab.app/translate';
-const LIBRETRANSLATE_API_KEY = process.env.LIBRETRANSLATE_API_KEY || '';
+// ── Translation (caption display-language feature) ────────────────
+// MyMemory (https://mymemory.translated.net) — no API key required, no
+// self-hosting needed. Free tier is ~5,000 chars/day per IP; setting
+// MYMEMORY_EMAIL bumps that to ~50,000/day per MyMemory's own policy.
+const MYMEMORY_URL = 'https://api.mymemory.translated.net/get';
+const MYMEMORY_EMAIL = process.env.MYMEMORY_EMAIL || '';
 const TRANSLATE_TIMEOUT_MS = 5000;
 const MAX_TRANSLATION_CACHE = 500;
 const translationCache = new Map();
 
-// The browser speech API uses BCP-47 locale tags, while LibreTranslate uses
-// ISO 639 language codes. Keep this allow-list aligned with the client.
-const LIBRETRANSLATE_TARGETS = new Map([
+// The browser speech API uses BCP-47 locale tags, while MyMemory expects
+// ISO 639-ish codes. Keep this allow-list aligned with the client's
+// CAPTION_TRANSLATION_LANGUAGES in utils/captionLanguages.js.
+const MYMEMORY_TARGETS = new Map([
   ['en-US', 'en'], ['en-GB', 'en'], ['en-IN', 'en'],
   ['es-ES', 'es'], ['es-MX', 'es'], ['fr-FR', 'fr'], ['de-DE', 'de'],
   ['it-IT', 'it'], ['pt-BR', 'pt-BR'], ['pt-PT', 'pt'], ['nl-NL', 'nl'],
   ['hi-IN', 'hi'], ['bn-IN', 'bn'],
-  ['zh-CN', 'zh-Hans'], ['zh-TW', 'zh-Hant'],
+  ['zh-CN', 'zh-CN'], ['zh-TW', 'zh-TW'],
   ['ja-JP', 'ja'], ['ko-KR', 'ko'], ['ar-SA', 'ar'], ['ru-RU', 'ru'],
   ['tr-TR', 'tr'], ['vi-VN', 'vi'], ['id-ID', 'id'], ['pl-PL', 'pl'],
 ]);
 
 function getTranslationTarget(displayLang) {
-  return LIBRETRANSLATE_TARGETS.get(String(displayLang || '')) || '';
+  return MYMEMORY_TARGETS.get(String(displayLang || '')) || '';
 }
 
 async function translateText(text, displayLang) {
@@ -48,20 +50,30 @@ async function translateText(text, displayLang) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
   try {
-    const body = { q: text, source: 'auto', target, format: 'text' };
-    if (LIBRETRANSLATE_API_KEY) body.api_key = LIBRETRANSLATE_API_KEY;
-    const response = await fetch(LIBRETRANSLATE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    // MyMemory has no true source="auto" — 'autodetect' is the documented
+    // trick to get language-detection behavior instead of hardcoding a
+    // source language we don't actually know (the caption-text event
+    // never tells the server what language the speaker used).
+    const params = new URLSearchParams({
+      q: text,
+      langpair: `autodetect|${target}`,
+    });
+    if (MYMEMORY_EMAIL) params.set('de', MYMEMORY_EMAIL);
+
+    const response = await fetch(`${MYMEMORY_URL}?${params.toString()}`, {
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`LibreTranslate responded ${response.status}`);
+    if (!response.ok) throw new Error(`MyMemory responded ${response.status}`);
     const data = await response.json();
-    const translated = typeof data?.translatedText === 'string'
-      ? data.translatedText.trim()
+    const translated = typeof data?.responseData?.translatedText === 'string'
+      ? data.responseData.translatedText.trim()
       : '';
-    if (!translated) throw new Error('LibreTranslate returned no translatedText');
+    // MyMemory returns 200 with an error string in responseData on quota
+    // exhaustion/bad language pairs instead of a non-2xx status — filter
+    // those out so they don't get cached/shown as real translations.
+    if (!translated || /MYMEMORY WARNING|INVALID (SOURCE|TARGET) LANGUAGE/i.test(translated)) {
+      throw new Error('MyMemory returned no usable translation');
+    }
 
     if (translationCache.size >= MAX_TRANSLATION_CACHE) {
       translationCache.delete(translationCache.keys().next().value);
@@ -69,7 +81,7 @@ async function translateText(text, displayLang) {
     translationCache.set(key, translated);
     return { translatedText: translated, error: null };
   } catch (err) {
-    console.warn('[Translate] LibreTranslate request failed:', err.message);
+    console.warn('[Translate] MyMemory request failed:', err.message);
     const error = err.name === 'AbortError'
       ? 'provider-timeout'
       : 'provider-request-failed';
@@ -843,7 +855,7 @@ io.on('connection', (socket) => {
   // The server never sees or stores audio — each client runs its own
   // browser's SpeechRecognition on its own mic and relays only the
   // resulting text. Caption text is not persisted. When a viewer opts into
-  // translation, text is sent to the configured hosted LibreTranslate API.
+  // translation, text is sent to MyMemory's hosted translation API.
   socket.on('caption-text', async ({ roomId, text, isFinal, wantOwnTranslation }, callback) => {
     const room = rooms.get(roomId);
     const participant = room?.get(socket.id);
